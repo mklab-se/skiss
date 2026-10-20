@@ -24,8 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one HTML comment appendix at the end of the file, one line per decorated card.
 - New cards (double-click, Tab), moving and reparenting by drag, grouping into areas (⌘G),
   colors (toolbar or 1 to 7, with names you choose), deleting cards and connections.
-- Infinite zoom with levels of detail, a readable start view for big boards, collapsible long
-  cards, presenter text size (⌘⇧+ and ⌘⇧−), and springy animations that stop when nothing moves.
+- Infinite zoom with levels of detail, a readable start view for big boards, every card showing
+  all of its text (nothing is ever cut off or hidden behind a click), presenter text size (⌘⇧+ and ⌘⇧−), and springy animations that stop when nothing moves.
 - Two themes: Sketchbook (default) and Ember, switched with ⌘T or `--theme`.
 - A dock with + Card, + Area, Group, Tidy up (⌘⇧L), theme and help. Moving a card keeps
   everything else where it is; Tidy up lays the board out afresh.
@@ -46,8 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out. Area names show once at any zoom.
 - Arrows avoid passing under cards (so they never seem to point at the wrong one), avoid loops,
   and stay inside the board. The opening view includes them.
-- Opening a long card, or typing in one, only nudges the cards it covers; the rest of the board
-  stays put.
+- Typing in a card only nudges the cards it covers; the rest of the board stays put.
 - Resizing cards and areas from a corner grip; pasting copied cards between boards keeps them
   cards.
 

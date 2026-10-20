@@ -183,9 +183,6 @@ type Route = (Rect, Rect, u64, (u8, u8), f32);
 /// A connection label to draw on top of the cards.
 type Label = (Rect, std::sync::Arc<egui::Galley>, Color32);
 
-/// Text height (world units) a long card shows until it is selected.
-const COLLAPSED_HEIGHT: f32 = 420.0;
-
 const LIST_EPS: f32 = 4.0;
 
 impl BoardView {
@@ -418,24 +415,7 @@ impl BoardView {
     // Layout
     // =========================================================================================
 
-    /// Cards shown at full length: the selected ones and the one being edited.
-    fn expanded(&self) -> Vec<String> {
-        let mut v = self.selection.clone();
-        if let Some(ed) = &self.editor {
-            v.push(ed.card_id.clone());
-        }
-        v.sort();
-        v
-    }
-
     fn relayout(&mut self, ctx: &egui::Context, theme: &Theme) {
-        let expanded = self.expanded();
-        let exp_hash = {
-            use std::hash::{Hash, Hasher};
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            expanded.hash(&mut h);
-            h.finish()
-        };
         // The card being edited is measured from the editor (blank lines included), not the file.
         let editing: Option<(String, Option<Vec<Span>>, Vec<Line>)> =
             self.editor.as_ref().map(|ed| {
@@ -459,7 +439,7 @@ impl BoardView {
             h.finish()
         };
         let key = (
-            self.doc.revision ^ exp_hash.rotate_left(17) ^ edit_hash.rotate_left(31),
+            self.doc.revision ^ edit_hash.rotate_left(31),
             self.text_scale,
             self.theme_rev,
         );
@@ -501,16 +481,13 @@ impl BoardView {
                     let t = content::layout(fonts, &st, title, lines, width, &mut aspect);
                     t.size.y.max(theme.body_size * self.text_scale)
                 };
-                // Long cards rest collapsed and unfold when selected or edited.
-                let max = COLLAPSED_HEIGHT * self.text_scale;
-                let collapse = |full: f32| if full > max * 1.15 { max } else { full };
+                // Every card shows all of its text, always.
                 let saved_h = height(saved.as_deref(), &card.lines);
                 let shown = match &editing {
                     Some((id, t, lines)) if *id == card.id => height(t.as_deref(), lines),
-                    _ if expanded.contains(&card.id) => saved_h,
-                    _ => collapse(saved_h),
+                    _ => saved_h,
                 };
-                (shown, collapse(saved_h))
+                (shown, saved_h)
             };
             let aspect = |url: &str| images.peek_aspect(&dir, url);
             layout::compute(
@@ -1365,21 +1342,14 @@ impl BoardView {
                     &mut aspect,
                 )
             });
-            // Scaled text units -> screen: factor zoom/scale (close to 1).
-            let k = zoom / scale * s;
+            // Scaled text units -> screen: factor zoom/scale (close to 1). Text wraps a little
+            // differently at each zoom step; if it would run past the bottom edge, it shrinks a
+            // hair instead, so every word stays inside the card.
+            let mut k = zoom / scale * s;
+            if !editing && text.size.y * k > inner.height() && text.size.y > 0.0 {
+                k = inner.height() / text.size.y;
+            }
             let origin = inner.min;
-            // A collapsed card shows its first part, fading out at the bottom.
-            let clipped = !editing && text.size.y * k > inner.height() + 3.0;
-            let outer_p = p;
-            let cut = inner.max.y - 12.0 * zoom;
-            let clip_p = if clipped {
-                p.with_clip_rect(
-                    Rect::from_min_max(sr.min, pos2(sr.max.x, cut)).intersect(p.clip_rect()),
-                )
-            } else {
-                p.clone()
-            };
-            let p = &clip_p;
             let placeholder = editing
                 && title
                     .as_ref()
@@ -1581,39 +1551,6 @@ impl BoardView {
                 // Links are clickable (when not editing this card).
                 if !editing {
                     self.collect_links(row, pos, k, &lines);
-                }
-            }
-            if clipped {
-                let fade_h = (46.0 * zoom).min(inner.height() * 0.5);
-                let band = Rect::from_min_max(
-                    pos2(sr.min.x + 2.0, cut - fade_h),
-                    pos2(sr.max.x - 2.0, cut),
-                );
-                let mut mesh = egui::Mesh::default();
-                let top = fill.gamma_multiply(0.0);
-                let bottom = fill.gamma_multiply(alpha);
-                let i = mesh.vertices.len() as u32;
-                mesh.colored_vertex(band.left_top(), top);
-                mesh.colored_vertex(band.right_top(), top);
-                mesh.colored_vertex(band.right_bottom(), bottom);
-                mesh.colored_vertex(band.left_bottom(), bottom);
-                mesh.add_triangle(i, i + 1, i + 2);
-                mesh.add_triangle(i, i + 2, i + 3);
-                outer_p.add(Shape::mesh(mesh));
-                let more = Rect::from_min_max(
-                    pos2(sr.min.x + 2.0, cut),
-                    pos2(sr.max.x - 2.0, sr.max.y - 2.0),
-                );
-                outer_p.rect_filled(more, 0.0, fill.gamma_multiply(alpha));
-                let size = (theme.body_size * 0.62 * zoom * self.text_scale).max(6.0);
-                if size >= 7.0 {
-                    outer_p.text(
-                        pos2(sr.center().x, (cut + sr.max.y) / 2.0),
-                        Align2::CENTER_CENTER,
-                        "· · ·  more",
-                        FontId::new(size, FontFamily::Proportional),
-                        theme.muted.gamma_multiply(alpha),
-                    );
                 }
             }
             if editing {

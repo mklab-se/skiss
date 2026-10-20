@@ -63,8 +63,8 @@ impl Layout {
 }
 
 /// Measures the text height of a card for a given width (world units): as shown now, and at
-/// rest (collapsed, not being edited). Packing uses the resting size, so opening or typing in a
-/// card only nudges what it covers instead of shuffling the board.
+/// rest (as saved, not being edited). Packing uses the resting size, so typing in a card only
+/// nudges what it covers instead of shuffling the board.
 pub type Measure<'a> = dyn FnMut(&Card, f32) -> (f32, f32) + 'a;
 
 /// Height / width of a picture, when known.
