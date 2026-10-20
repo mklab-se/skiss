@@ -16,9 +16,14 @@ use super::document::Document;
 use super::draw;
 use super::editor::{Action, Editor, Pos};
 use super::images::{self, Images};
+use super::jot::JOT_ID;
 use super::layout::{self, CARD_PAD, Kind, Layout};
-use super::motion::{Camera, Motion};
+use super::motion::{Anim, Camera, Motion};
 use super::theme::Theme;
+
+#[path = "jot_ui.rs"]
+mod jot_ui;
+use jot_ui::JotState;
 
 #[derive(Clone, Debug)]
 enum Drag {
@@ -128,6 +133,13 @@ pub struct BoardView {
     hots: Vec<(Rect, Hot)>,
     /// Editing text layout from the last paint (for clicks and arrows).
     edit_text: Option<(Rect, CardText, f32)>,
+    /// The card padding (screen points) where the text being edited was drawn.
+    edit_pad: f32,
+    /// A note being jotted (see `jot_ui.rs`), and where its draft card is drawn.
+    jot: Option<JotState>,
+    jot_anim: Option<Anim>,
+    /// A card to bring into view once the layout has it (a note that was just placed).
+    reveal_card: Option<String>,
     toast: Option<(String, f64)>,
     help: bool,
     tilts: HashMap<String, f32>,
@@ -205,6 +217,10 @@ impl BoardView {
             images: Images::default(),
             hots: Vec::new(),
             edit_text: None,
+            edit_pad: 0.0,
+            jot: None,
+            jot_anim: None,
+            reveal_card: None,
             toast: None,
             help: false,
             tilts: HashMap::new(),
@@ -319,7 +335,11 @@ impl BoardView {
             ui.scope_id().with("canvas"),
             Sense::click_and_drag(),
         );
-        self.scroll_and_zoom(ui, screen, &response);
+        if self.jot.is_some() {
+            self.jot_scroll(ui);
+        } else {
+            self.scroll_and_zoom(ui, screen, &response);
+        }
 
         // Animate towards the layout.
         let overrides = self.drag_overrides(ui, screen);
@@ -337,6 +357,12 @@ impl BoardView {
             {
                 // The layout target, not the animated rect: that is where it is going.
                 self.camera.reveal(screen, n.rect, 70.0);
+            }
+        }
+        if let Some(id) = self.reveal_card.take() {
+            match self.layout.get(&id) {
+                Some(n) => self.camera.reveal(screen, n.rect, 70.0),
+                None => self.reveal_card = Some(id),
             }
         }
         moving |= self.camera.step(dt);
@@ -363,12 +389,18 @@ impl BoardView {
         }
 
         // Pointer input on things.
-        self.pointer(ui, screen, &response, theme);
+        if self.jot.is_some() {
+            self.jot_pointer(ui);
+        } else {
+            self.pointer(ui, screen, &response, theme);
+        }
 
         // Overlays.
         self.toolbar(ui, screen, theme);
         self.ai_menu_ui(ui, theme);
         self.poll_ai(ui);
+        self.poll_jot(now);
+        self.jot_choices_ui(ui, theme);
         self.search_ui(ui, screen, theme);
         self.about_ui(ui, screen, theme);
         if let Some(r) = self.dock(ui, screen, theme) {
@@ -384,7 +416,8 @@ impl BoardView {
         if let Some(wait) = self.doc.autosave(false) {
             ctx.request_repaint_after(wait);
         }
-        if moving || !matches!(self.drag, Drag::None) || !self.ai_jobs.is_empty() {
+        let jot_busy = self.jot.as_ref().is_some_and(|j| j.job.is_some());
+        if moving || !matches!(self.drag, Drag::None) || !self.ai_jobs.is_empty() || jot_busy {
             ctx.request_repaint();
         }
         if self.editor.is_some() {
@@ -696,6 +729,11 @@ impl BoardView {
             let r = Rect::from_two_pos(*start, ptr);
             p.rect_filled(r, 4.0, theme.accent_soft.gamma_multiply(0.25));
             p.rect_stroke(r, 4.0, Stroke::new(1.2, theme.accent), StrokeKind::Inside);
+        }
+
+        // A jot covers the board.
+        if self.jot.is_some() {
+            self.paint_jot(ctx, p, screen, theme, now);
         }
     }
 
@@ -1058,7 +1096,13 @@ impl BoardView {
         id: &str,
         now: f64,
     ) {
-        let Some(anim) = self.motion.get(id).copied() else {
+        let jot = id == JOT_ID;
+        let anim = if jot {
+            self.jot_anim
+        } else {
+            self.motion.get(id).copied()
+        };
+        let Some(anim) = anim else {
             return;
         };
         if anim.delay > 0.0 {
@@ -1076,7 +1120,12 @@ impl BoardView {
             return;
         }
         let alpha = anim.alpha() * self.dim_factor(id);
-        let Some(card) = self.doc.board.card(id).cloned() else {
+        let card = if jot {
+            self.jot.as_ref().map(|j| j.card.clone())
+        } else {
+            self.doc.board.card(id).cloned()
+        };
+        let Some(card) = card else {
             return;
         };
         let deco = self.doc.board.appendix.get(&card.key).cloned();
@@ -1559,6 +1608,7 @@ impl BoardView {
             if editing {
                 self.paint_editor(p, &text, origin, k, theme, now);
                 self.edit_text = Some((sr, text, k));
+                self.edit_pad = pad;
             }
         }
         // A card the AI is working on shimmers, with a note of what is happening.
@@ -1597,7 +1647,9 @@ impl BoardView {
             );
         }
         // Handles for connecting.
-        self.paint_handles(p, id, sr, theme);
+        if !jot {
+            self.paint_handles(p, id, sr, theme);
+        }
     }
 
     fn collect_links(&mut self, row: &content::Row, pos: Pos2, k: f32, lines: &[Line]) {
@@ -2535,6 +2587,11 @@ impl BoardView {
     /// Writes the editor's text into the document.
     fn commit_editor(&mut self, force_step: bool) {
         let Some(ed) = &mut self.editor else { return };
+        // A jot is not in the file until it is placed.
+        if self.jot.is_some() {
+            ed.dirty = false;
+            return;
+        }
         if !ed.dirty {
             return;
         }
@@ -2576,6 +2633,9 @@ impl BoardView {
     }
 
     fn finish_editing(&mut self) {
+        if self.jot.is_some() {
+            return;
+        }
         self.commit_editor(false);
         if let Some(ed) = self.editor.take() {
             // A card left without any text is removed (a fresh card abandoned, or text erased).
@@ -2599,12 +2659,10 @@ impl BoardView {
     fn editor_pos_at(&self, at: Pos2) -> Option<Pos> {
         let (_, text, k) = self.edit_text.as_ref()?;
         let ed = self.editor.as_ref()?;
-        let card_rect = self.motion.rect(&ed.card_id)?;
-        let _ = card_rect;
         let has_title = ed.has_title();
         // Find the row whose vertical span contains the point (or the nearest).
         let (sr, _, _) = self.edit_text.as_ref()?;
-        let pad = CARD_PAD * self.camera.zoom;
+        let pad = self.edit_pad;
         let origin = sr.min + Vec2::splat(pad);
         let mut best: Option<(&content::Row, f32)> = None;
         for row in &text.rows {
@@ -2699,7 +2757,35 @@ impl BoardView {
         let now = ui.input(|i| i.time);
         let mut request = None;
         for ev in events {
+            if let Some(j) = &mut self.jot {
+                // The `.` that opened the jot is not part of the note.
+                if j.swallow_dot && matches!(&ev, Event::Text(t) if t == ".") {
+                    j.swallow_dot = false;
+                    continue;
+                }
+                // While AI works or a place is being chosen, only Esc does anything.
+                if j.job.is_some() || !j.choices.is_empty() {
+                    if matches!(
+                        ev,
+                        Event::Key {
+                            key: Key::Escape,
+                            pressed: true,
+                            ..
+                        }
+                    ) {
+                        self.jot_escape(now);
+                    }
+                    continue;
+                }
+            }
             if self.editor.is_some() && self.editor_event(ui, &ev, now) {
+                continue;
+            }
+            if self.jot.is_some() {
+                // Nothing reaches the board under a jot; pictures go into it.
+                if let Event::PasteImage(img) = &ev {
+                    self.paste_image(ui, screen, img);
+                }
                 continue;
             }
             match ev {
@@ -2739,6 +2825,7 @@ impl BoardView {
         let ctx = ui.ctx().clone();
         let mut action = Action::None;
         let mut consumed = true;
+        let is_jot = self.jot.is_some();
         let Some(ed) = &mut self.editor else {
             return false;
         };
@@ -2771,6 +2858,17 @@ impl BoardView {
                 let line_jump =
                     m.command && cfg!(target_os = "macos") || (!cfg!(target_os = "macos") && false);
                 match key {
+                    Key::Escape if is_jot => {
+                        self.jot_escape(now);
+                        return true;
+                    }
+                    // In a jot, Enter puts the note in its place.
+                    Key::Enter if is_jot && (m.command || !(m.shift || m.alt)) => {
+                        self.submit_jot(&ctx, now);
+                        return true;
+                    }
+                    Key::Enter if is_jot && m.shift => action = ed.newline(),
+                    Key::Enter if is_jot => action = ed.line_break(),
                     Key::Escape => {
                         self.finish_editing();
                         return true;
@@ -2785,7 +2883,7 @@ impl BoardView {
                     Key::Delete => action = ed.delete_forward(word),
                     Key::Tab => {
                         action = ed.indent(m.shift);
-                        if action == Action::None && !m.shift {
+                        if action == Action::None && !m.shift && !is_jot {
                             // Tab outside a list: finish and add the next card.
                             let id = ed.card_id.clone();
                             self.finish_editing();
@@ -2856,6 +2954,8 @@ impl BoardView {
                     Key::E if m.command => action = ed.toggle_style(|s| &mut s.code),
                     Key::X if m.command && m.shift => action = ed.toggle_style(|s| &mut s.strike),
                     Key::L if m.command => action = ed.toggle_task(),
+                    // A jot has no undo of its own, and the board's must not run under it.
+                    Key::Z | Key::Y if m.command && is_jot => {}
                     Key::Z if m.command => {
                         // Undo leaves editing and undoes the last change.
                         self.commit_editor(true);
@@ -2892,6 +2992,7 @@ impl BoardView {
                 self.commit_editor(structural);
                 self.reveal_caret_card();
             }
+            Action::NewSibling if is_jot => {}
             Action::NewSibling => {
                 let id = self
                     .editor
@@ -3006,6 +3107,9 @@ impl BoardView {
         now: f64,
     ) -> Option<UiRequest> {
         match key {
+            Key::Period if !m.command && !m.ctrl && !m.alt && self.editor.is_none() => {
+                self.open_jot(now)
+            }
             Key::Z if m.command && m.shift => self.redo(),
             Key::Z if m.command => self.undo(),
             Key::Y if m.command => self.redo(),
@@ -4291,6 +4395,13 @@ impl BoardView {
                             };
                         b(
                             ui,
+                            "+ Note",
+                            "Write a note; Skiss puts it in its place (.)",
+                            true,
+                            "note",
+                        );
+                        b(
+                            ui,
                             "+ Card",
                             "New card (double-click empty space, or Tab)",
                             true,
@@ -4341,6 +4452,7 @@ impl BoardView {
                     focus: true,
                 });
             }
+            Some("note") => self.open_jot(now),
             Some("group") => self.group_selected(screen),
             Some("tidy") => self.tidy_up(),
             Some("help") => self.help = !self.help,
@@ -4687,6 +4799,7 @@ impl BoardView {
             (
                 "Cards",
                 &[
+                    (Keys(&["."]), "jot a note: Enter puts it in its place"),
                     (Do("Double-click"), "new card, or edit one"),
                     (Keys(&["Enter"]), "edit the selected card"),
                     (Keys(&["Tab"]), "add the next card"),
@@ -4719,6 +4832,7 @@ impl BoardView {
                     (Keys(&["⌘B", "⌘I", "⌘E"]), "bold, italic, code"),
                     (Keys(&["⇧Enter"]), "line break in a paragraph"),
                     (Keys(&["⌘L"]), "turn a line into a task"),
+                    (Keys(&["/"]), "start a jot with it to ask AI"),
                     (Keys(&["⌘Z", "⌘Y"]), "undo, redo"),
                     (Keys(&["A"]), "AI: spelling, rewriting, pictures"),
                 ],

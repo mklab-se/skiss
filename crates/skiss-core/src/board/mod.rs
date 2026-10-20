@@ -5,6 +5,7 @@ pub mod blocks;
 pub mod edit;
 pub mod inline;
 pub mod model;
+pub mod place;
 pub mod query;
 pub mod slug;
 pub mod tree;

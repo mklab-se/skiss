@@ -57,6 +57,13 @@ pub struct Anim {
 }
 
 impl Anim {
+    /// An animation already at rest at `rect` (for something drawn outside the layout).
+    pub fn settled(rect: Rect) -> Self {
+        let mut a = Anim::new(rect, None, 0.0);
+        a.appear = 1.0;
+        a
+    }
+
     fn new(rect: Rect, from: Option<Rect>, delay: f32) -> Self {
         let start = from.unwrap_or(rect);
         Anim {

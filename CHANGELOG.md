@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Jot: press `.` anywhere and write. A large editor opens over the board with everything a card
+  has (formatting, links, lists, tasks, tables, pasted pictures); Enter puts the note where it
+  belongs. With Ailloy set up, a judge model (TypeSafe Jev when you have an eval node, else your
+  chat model) picks the area, adds a short to-do to a matching checklist, and asks you when it
+  is unsure; the note takes the format of its new neighbors (dated titles in a journal stay in
+  date order). Start a jot with `/` to have AI write it, with the whole board as context
+  (`/summarize this board in two paragraphs`), or `/picture` to draw one. Without AI, notes go
+  to an Inbox area. The dock has a + Note button.
+
 ## [0.1.0] - 2026-10-20
 
 ### Added

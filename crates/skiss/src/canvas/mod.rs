@@ -8,6 +8,7 @@ mod draw;
 mod editor;
 mod fonts;
 mod images;
+mod jot;
 mod layout;
 mod motion;
 mod script;
