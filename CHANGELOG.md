@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-20
+
 ### Added
 
 - The canvas. `skiss <file>` opens any Markdown file as a board (and creates the file if it does
@@ -74,5 +76,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completions, version banner, background update checker, and auditable release builds with
   CycloneDX SBOMs.
 
-[Unreleased]: https://github.com/mklab-se/skiss/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/mklab-se/skiss/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/mklab-se/skiss/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/mklab-se/skiss/releases/tag/v0.0.1

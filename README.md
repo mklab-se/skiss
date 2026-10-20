@@ -11,8 +11,9 @@
 <!-- "What's new" callout: keep it right after the badges and refresh it on every minor/major
      release (version and a one-line summary of the headline changes). Only link CHANGELOG.md. -->
 <p align="center">
-  <strong>skiss</strong> now opens any Markdown file as a living board: cards, areas, arrows
-  written as plain sentences, and every change saved straight back to your file.<br>
+  <strong>skiss 0.1</strong> is here: any Markdown file opens as a living board, with arrows
+  written as sentences, org charts and timelines that lay themselves out, and every change saved
+  straight back to your file.<br>
   <a href="CHANGELOG.md"><strong>What's new</strong></a>
 </p>
 
