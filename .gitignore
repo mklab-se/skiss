@@ -17,3 +17,6 @@ coverage/
 
 **/mutants.out*/
 *.pdb
+
+# Brainstorming companion mockups
+.superpowers/

@@ -11,7 +11,7 @@ edition = "2024"
 authors = ["Kristofer Liljeblad <kristofer@mklab.se>"]
 license = "MIT"
 repository = "https://github.com/mklab-se/skiss"
-rust-version = "1.88"
+rust-version = "1.95"
 
 [workspace.dependencies]
 # Internal crates
@@ -54,6 +54,18 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 
 # Directories
 dirs = "7.0"
+
+# Canvas UI (egui 0.37 needs Rust 1.95, which sets the MSRV)
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard", "links", "wayland", "x11"] }
+egui = { version = "0.37", default-features = false, features = ["default_fonts"] }
+
+# Markdown
+pulldown-cmark = { version = "0.13", default-features = false }
+
+# File watching, clipboard images, image files
+notify = "8.2"
+arboard = "3.7"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
 # AI
 ailloy = { version = "3.0", default-features = false, features = ["config-tui"] }

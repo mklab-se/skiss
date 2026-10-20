@@ -7,6 +7,7 @@
 //!
 //! When you build a real tool from this template, put your domain logic here.
 
+pub mod board;
 pub mod config;
 pub mod error;
 pub mod paths;
