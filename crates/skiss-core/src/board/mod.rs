@@ -5,6 +5,7 @@ pub mod blocks;
 pub mod edit;
 pub mod inline;
 pub mod model;
+pub mod query;
 pub mod slug;
 
 pub use appendix::{Appendix, Color};

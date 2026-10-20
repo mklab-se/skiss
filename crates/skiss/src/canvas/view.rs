@@ -7,6 +7,7 @@ use egui::{
     Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
 use skiss_core::board::edit::{self, Edited};
+use skiss_core::board::query;
 use skiss_core::board::{Board, Card, CardKind, Color, Line, LineKind, NodeRef, Span};
 
 use super::content::{self, CardText, Marker, RowKind, TextStyle};
@@ -119,6 +120,20 @@ pub struct BoardView {
     title_rect: Option<Rect>,
     /// Dock buttons on screen (for scripted tests).
     dock_buttons: Vec<(String, Rect)>,
+    /// The ⌘F search bar.
+    search: Option<Search>,
+    /// The card whose related things are shown in the side panel.
+    about: Option<String>,
+    /// Ids in focus this frame (search hits, related things), with their areas.
+    focus: Option<std::collections::HashSet<String>>,
+}
+
+struct Search {
+    query: String,
+    color: Option<Color>,
+    results: Vec<String>,
+    index: usize,
+    focus: bool,
 }
 
 /// A connection label to draw on top of the cards.
@@ -163,6 +178,9 @@ impl BoardView {
             hover_conn: None,
             title_rect: None,
             dock_buttons: Vec::new(),
+            search: None,
+            about: None,
+            focus: None,
         }
     }
 
@@ -225,8 +243,8 @@ impl BoardView {
         }
 
         // Keyboard (unless a prompt has focus).
-        let prompt_focus = self.prompt.is_some();
-        if !prompt_focus {
+        let field_focus = self.prompt.is_some() || ui.ctx().memory(|m| m.focused().is_some());
+        if !field_focus {
             request = self.keyboard(ui, screen, theme);
         }
 
@@ -283,6 +301,8 @@ impl BoardView {
         moving |= self.camera.step(dt);
         moving |= self.step_tilts(dt);
 
+        self.compute_focus();
+
         // Paint, collecting clickable spots.
         let painter = ui.painter_at(screen);
         self.paint(&ctx, &painter, screen, theme, now);
@@ -299,6 +319,8 @@ impl BoardView {
 
         // Overlays.
         self.toolbar(ui, screen, theme);
+        self.search_ui(ui, screen, theme);
+        self.about_ui(ui, screen, theme);
         if let Some(r) = self.dock(ui, screen, theme) {
             request = Some(r);
         }
@@ -835,7 +857,8 @@ impl BoardView {
             let hot = chosen
                 || self.selection.iter().any(|s| s == &from || s == &to)
                 || self.hover.as_deref().is_some_and(|h| h == from || h == to);
-            let color = if hot { theme.accent } else { theme.arrow };
+            let dim = self.dim_factor(&from).min(self.dim_factor(&to)).max(0.35);
+            let color = if hot { theme.accent } else { theme.arrow }.gamma_multiply(dim);
             let width = (if chosen {
                 3.0
             } else if hot {
@@ -940,7 +963,7 @@ impl BoardView {
         if !screen.expand(60.0).intersects(sr) {
             return;
         }
-        let alpha = anim.alpha();
+        let alpha = anim.alpha() * self.dim_factor(id);
         let Some(card) = self.doc.board.card(id).cloned() else {
             return;
         };
@@ -2771,7 +2794,7 @@ impl BoardView {
                 self.camera
                     .fly_to(screen, Rect::from_center_size(c, screen.size()), 0.0, 1.0);
             }
-            Key::F if !m.command => self.fit(screen),
+            Key::F if !m.command && !m.shift => self.fit(screen),
             Key::A if m.command => {
                 self.selection = self
                     .layout
@@ -2786,10 +2809,23 @@ impl BoardView {
                     .collect();
             }
             Key::G if m.command => self.group_selected(screen),
+            Key::F if m.command => self.open_search(),
+            Key::R if !m.command => {
+                if let Some(id) = self.selection.first().cloned() {
+                    self.about = if self.about.as_deref() == Some(id.as_str()) {
+                        None
+                    } else {
+                        Some(id)
+                    };
+                }
+            }
             Key::L if m.command && m.shift => self.tidy_up(),
             Key::Escape => {
                 if self.help {
                     self.help = false;
+                } else if self.search.is_some() || self.about.is_some() {
+                    self.search = None;
+                    self.about = None;
                 } else if !self.selection.is_empty() || self.selected_conn.is_some() {
                     self.selection.clear();
                     self.selected_conn = None;
@@ -3225,6 +3261,15 @@ impl BoardView {
                             {
                                 actions.push(ToolbarAction::Edit);
                             }
+                            if !editing
+                                && tb(
+                                    ui,
+                                    egui::RichText::new("Related").size(13.0),
+                                    "Everything about it (R)",
+                                )
+                            {
+                                actions.push(ToolbarAction::Related);
+                            }
                             if tb(ui, egui::RichText::new("Delete").size(13.0), "Delete (⌫)") {
                                 actions.push(ToolbarAction::Delete);
                             }
@@ -3278,6 +3323,9 @@ impl BoardView {
                     self.editor = None;
                     self.delete_selected();
                 }
+                ToolbarAction::Related => {
+                    self.about = self.selection.first().cloned();
+                }
             }
         }
     }
@@ -3294,6 +3342,370 @@ impl BoardView {
             }
         });
         self.doc.apply(src, &self.selection, None);
+    }
+
+    /// What is in focus while searching or showing related things (`None`: everything).
+    fn compute_focus(&mut self) {
+        let mut ids: Option<Vec<String>> = None;
+        if let Some(s) = &self.search
+            && (!s.query.trim().is_empty() || s.color.is_some())
+        {
+            ids = Some(s.results.clone());
+        } else if let Some(a) = &self.about {
+            let r = query::related(&self.doc.board, a);
+            let mut v: Vec<String> = vec![a.clone()];
+            v.extend(r.outgoing.iter().map(|l| l.other.clone()));
+            v.extend(r.incoming.iter().map(|l| l.other.clone()));
+            v.extend(r.mentions.iter().cloned());
+            ids = Some(v);
+        }
+        self.focus = ids.map(|ids| {
+            let mut set: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for id in &ids {
+                // A focused card keeps the areas around it readable, and an area its cards.
+                set.insert(id.clone());
+                let mut cur = self.layout.get(id).and_then(|n| n.parent.clone());
+                while let Some(p) = cur {
+                    cur = self.layout.get(&p).and_then(|n| n.parent.clone());
+                    set.insert(p);
+                }
+            }
+            for id in &ids {
+                for (other, _) in self.layout.nodes.iter() {
+                    if self.is_inside(other, id) {
+                        set.insert(other.clone());
+                    }
+                }
+            }
+            set
+        });
+    }
+
+    /// 1 for things in focus, faint for the rest.
+    fn dim_factor(&self, id: &str) -> f32 {
+        match &self.focus {
+            Some(set) if !set.contains(id) => 0.22,
+            _ => 1.0,
+        }
+    }
+
+    fn open_search(&mut self) {
+        if let Some(ed) = self.editor.as_ref().map(|e| e.card_id.clone()) {
+            let _ = ed;
+            self.finish_editing();
+        }
+        self.search = Some(Search {
+            query: String::new(),
+            color: None,
+            results: Vec::new(),
+            index: 0,
+            focus: true,
+        });
+    }
+
+    fn run_search(&mut self, screen: Rect) {
+        let Some(s) = &mut self.search else { return };
+        let board = &self.doc.board;
+        let mut results = if s.query.trim().is_empty() {
+            board
+                .walk()
+                .into_iter()
+                .filter(|n| !n.id().is_empty())
+                .map(|n| n.id().to_string())
+                .collect()
+        } else {
+            query::search(board, &s.query)
+        };
+        if let Some(c) = s.color {
+            results.retain(|id| {
+                board
+                    .node(id)
+                    .and_then(|n| board.appendix.get(n.key()))
+                    .is_some_and(|e| e.color == Some(c))
+            });
+        } else if s.query.trim().is_empty() {
+            results.clear();
+        }
+        s.results = results;
+        s.index = 0;
+        self.fly_to_hit(screen);
+    }
+
+    fn fly_to_hit(&mut self, screen: Rect) {
+        let Some(s) = &self.search else { return };
+        let Some(id) = s.results.get(s.index).cloned() else {
+            return;
+        };
+        if let Some(r) = self.motion.rect(&id) {
+            self.camera.fly_to(screen, r.expand(140.0), 60.0, 1.3);
+        }
+        self.selection = vec![id];
+    }
+
+    fn search_ui(&mut self, ui: &mut Ui, screen: Rect, theme: &Theme) {
+        let Some(s) = &mut self.search else { return };
+        let pc = PromptColors::of(theme);
+        let mut changed = false;
+        let mut step: i32 = 0;
+        let mut close = false;
+        let used: Vec<(Color, Option<String>)> = Color::ALL
+            .into_iter()
+            .filter(|c| {
+                self.doc
+                    .board
+                    .appendix
+                    .entries
+                    .iter()
+                    .any(|e| e.color == Some(*c))
+            })
+            .map(|c| (c, self.doc.board.appendix.color_name(c).map(str::to_string)))
+            .collect();
+        egui::Area::new(egui::Id::unique("skiss-search"))
+            .fixed_pos(screen.center_top() + vec2(0.0, 16.0))
+            .pivot(Align2::CENTER_TOP)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::new()
+                    .fill(pc.bg)
+                    .stroke(Stroke::new(
+                        if theme.dark { 0.0 } else { 1.5 },
+                        theme.card_stroke,
+                    ))
+                    .corner_radius(12.0)
+                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .shadow(egui::Shadow {
+                        offset: [0, 4],
+                        blur: 16,
+                        spread: 0,
+                        color: Color32::from_black_alpha(60),
+                    })
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let r = ui.add(
+                                egui::TextEdit::singleline(&mut s.query)
+                                    .hint_text("Search the board")
+                                    .desired_width(300.0)
+                                    .text_color(pc.text)
+                                    .background_color(pc.field)
+                                    .font(FontId::proportional(16.0)),
+                            );
+                            if s.focus {
+                                r.request_focus();
+                                s.focus = false;
+                            }
+                            if r.changed() {
+                                changed = true;
+                            }
+                            if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                                step = if ui.input(|i| i.modifiers.shift) {
+                                    -1
+                                } else {
+                                    1
+                                };
+                                r.request_focus();
+                            }
+                            if ui.input(|i| i.key_pressed(Key::Escape)) {
+                                close = true;
+                            }
+                            let n = s.results.len();
+                            let label = if s.query.trim().is_empty() && s.color.is_none() {
+                                String::new()
+                            } else if n == 0 {
+                                "no matches".to_string()
+                            } else {
+                                format!("{} of {n}", s.index + 1)
+                            };
+                            ui.label(egui::RichText::new(label).size(13.0).color(pc.muted));
+                        });
+                        if !used.is_empty() {
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                for (c, name) in &used {
+                                    let on = s.color == Some(*c);
+                                    let text = name.clone().unwrap_or_else(|| capitalize(c.name()));
+                                    let b = egui::Button::new(
+                                        egui::RichText::new(text).size(13.0).color(theme.ink(*c)),
+                                    )
+                                    .fill(theme.paper(*c))
+                                    .stroke(Stroke::new(if on { 2.0 } else { 0.0 }, theme.ink(*c)))
+                                    .corner_radius(8.0);
+                                    if ui.add(b).clicked() {
+                                        s.color = if on { None } else { Some(*c) };
+                                        changed = true;
+                                    }
+                                }
+                            });
+                        }
+                    });
+            });
+        if close {
+            self.search = None;
+            return;
+        }
+        if changed {
+            self.run_search(screen);
+        } else if step != 0
+            && let Some(s) = &mut self.search
+            && !s.results.is_empty()
+        {
+            let n = s.results.len() as i32;
+            s.index = ((s.index as i32 + step).rem_euclid(n)) as usize;
+            self.fly_to_hit(screen);
+        }
+    }
+
+    fn about_ui(&mut self, ui: &mut Ui, screen: Rect, theme: &Theme) {
+        let Some(id) = self.about.clone() else { return };
+        let board = &self.doc.board;
+        let Some(node) = board.node(&id) else {
+            self.about = None;
+            return;
+        };
+        let title_of = |x: &str| -> String {
+            board
+                .node(x)
+                .map(|n| match n.heading() {
+                    Some(h) if !h.text.is_empty() => h.text.clone(),
+                    _ => n.key().to_string(),
+                })
+                .unwrap_or_else(|| x.to_string())
+        };
+        let name = title_of(&id);
+        let r = query::related(board, &id);
+        let pc = PromptColors::of(theme);
+        let mut go: Option<String> = None;
+        let mut close = false;
+        let _ = node;
+        egui::Area::new(egui::Id::unique("skiss-about"))
+            .fixed_pos(screen.right_top() + vec2(-16.0, 16.0))
+            .pivot(Align2::RIGHT_TOP)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::new()
+                    .fill(pc.bg)
+                    .stroke(Stroke::new(
+                        if theme.dark { 0.0 } else { 1.5 },
+                        theme.card_stroke,
+                    ))
+                    .corner_radius(12.0)
+                    .inner_margin(egui::Margin::same(14))
+                    .shadow(egui::Shadow {
+                        offset: [0, 4],
+                        blur: 18,
+                        spread: 0,
+                        color: Color32::from_black_alpha(60),
+                    })
+                    .show(ui, |ui| {
+                        ui.set_width(300.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(&name)
+                                    .size(19.0)
+                                    .color(pc.text)
+                                    .strong(),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new("×").size(16.0).color(pc.muted),
+                                            )
+                                            .frame(false),
+                                        )
+                                        .clicked()
+                                    {
+                                        close = true;
+                                    }
+                                },
+                            );
+                        });
+                        if r.is_empty() {
+                            ui.label(
+                                egui::RichText::new("Nothing links here yet.").color(pc.muted),
+                            );
+                        }
+                        let mut row = |ui: &mut Ui, text: String, target: &str| {
+                            let b = egui::Button::new(
+                                egui::RichText::new(text).size(14.0).color(pc.text),
+                            )
+                            .frame(false)
+                            .wrap();
+                            if ui.add(b).on_hover_text("Go there").clicked() {
+                                go = Some(target.to_string());
+                            }
+                        };
+                        if !r.outgoing.is_empty() {
+                            ui.add_space(6.0);
+                            ui.label(
+                                egui::RichText::new("Connections")
+                                    .size(12.0)
+                                    .color(pc.muted),
+                            );
+                            for l in &r.outgoing {
+                                let note = if l.note.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" · {}", l.note)
+                                };
+                                row(
+                                    ui,
+                                    format!(
+                                        "→ {} {}{note}",
+                                        lowercase_first(&l.label),
+                                        title_of(&l.other)
+                                    ),
+                                    &l.other,
+                                );
+                            }
+                        }
+                        if !r.incoming.is_empty() {
+                            ui.add_space(6.0);
+                            ui.label(
+                                egui::RichText::new("Connected from")
+                                    .size(12.0)
+                                    .color(pc.muted),
+                            );
+                            for l in &r.incoming {
+                                let note = if l.note.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" · {}", l.note)
+                                };
+                                row(
+                                    ui,
+                                    format!(
+                                        "← {} {} {name}{note}",
+                                        title_of(&l.other),
+                                        lowercase_first(&l.label)
+                                    ),
+                                    &l.other,
+                                );
+                            }
+                        }
+                        if !r.mentions.is_empty() {
+                            ui.add_space(6.0);
+                            ui.label(
+                                egui::RichText::new("Mentioned in")
+                                    .size(12.0)
+                                    .color(pc.muted),
+                            );
+                            for m in &r.mentions {
+                                row(ui, format!("· {}", title_of(m)), m);
+                            }
+                        }
+                    });
+            });
+        if close {
+            self.about = None;
+        }
+        if let Some(t) = go
+            && let Some(rect) = self.motion.rect(&t)
+        {
+            self.camera.fly_to(screen, rect.expand(140.0), 60.0, 1.3);
+            self.selection = vec![t];
+        }
     }
 
     /// The dock at the bottom: the main things you can make, always in reach.
@@ -3723,6 +4135,8 @@ impl BoardView {
             ("Drag a card", "move it (into another area too)"),
             ("Drag a dot on the edge", "connect two cards"),
             ("Shift-drag", "select several"),
+            ("⌘F", "search (Enter for the next hit)"),
+            ("R", "everything about the selected card"),
             ("⌘G", "group into a new area"),
             ("⌘⇧L", "tidy up the layout"),
             ("⌘B  ⌘I  ⌘E", "bold, italic, code"),
@@ -3784,6 +4198,7 @@ enum ToolbarAction {
     NameColor(Color, Pos2),
     Edit,
     Delete,
+    Related,
 }
 
 pub enum UiRequest {
