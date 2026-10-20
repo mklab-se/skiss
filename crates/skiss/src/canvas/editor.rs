@@ -84,6 +84,9 @@ impl ELine {
     }
 }
 
+/// Picks one formatting flag of a style (bold, italic...).
+type StyleFlag = fn(&mut Style) -> &mut bool;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Pos {
     pub line: usize,
@@ -401,7 +404,7 @@ impl Editor {
         }
         let col = self.cursor.col;
         let chars: Vec<char> = self.lines[li].chars[..col].iter().map(|c| c.c).collect();
-        let rules: [(&str, fn(&mut Style) -> &mut bool); 5] = [
+        let rules: [(&str, StyleFlag); 5] = [
             ("**", |s| &mut s.bold),
             ("~~", |s| &mut s.strike),
             ("`", |s| &mut s.code),
@@ -646,7 +649,7 @@ impl Editor {
         Action::None
     }
 
-    pub fn toggle_style(&mut self, f: fn(&mut Style) -> &mut bool) -> Action {
+    pub fn toggle_style(&mut self, f: StyleFlag) -> Action {
         if !self.has_selection() {
             let (mut st, _) = self.style_here();
             let v = f(&mut st);
