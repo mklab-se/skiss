@@ -7,6 +7,7 @@ pub mod inline;
 pub mod model;
 pub mod query;
 pub mod slug;
+pub mod tree;
 
 pub use appendix::{Appendix, Color};
 pub use inline::{Span, Style};

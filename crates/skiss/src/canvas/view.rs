@@ -640,8 +640,14 @@ impl BoardView {
                     .max(base * self.text_scale)
                     .min(sr.width() / 3.0)
                     .max(9.0);
-                let font = FontId::new(size, theme.area_font.clone());
-                let g = p.layout_no_wrap(h.text.clone(), font, theme.text.gamma_multiply(fade));
+                let mut font = FontId::new(size, theme.area_font.clone());
+                let mut g = p.layout_no_wrap(h.text.clone(), font.clone(), theme.text);
+                // A name stays within its own frame, so neighbors keep theirs.
+                let room = sr.width() - 16.0;
+                if g.size().x > room {
+                    font.size = (size * room / g.size().x).max(9.0);
+                    g = p.layout_no_wrap(h.text.clone(), font, theme.text);
+                }
                 // On the frame's top edge, like a folder tab; a nested name that would collide
                 // with one already drawn is left out at this zoom.
                 let pos = pos2(sr.min.x + 8.0, sr.min.y - g.size().y * 0.55);

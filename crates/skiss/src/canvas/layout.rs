@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
-use skiss_core::board::{Appendix, Area, Board, Card, CardKind, LineKind, Node};
+use skiss_core::board::{Appendix, Area, Board, Card, CardKind, LineKind, Node, tree};
 
 pub const CARD_PAD: f32 = 16.0;
 pub const AREA_PAD: f32 = 28.0;
@@ -142,12 +142,16 @@ pub fn compute(
         linked.insert(from);
         linked.insert(to);
     }
+    let parents = tree::hierarchy(board);
+    let owners = tree::owners(board);
     let mut ctx = Ctx {
         app,
         measure,
         aspect,
         title_h: area_title_h,
         linked: &linked,
+        parents: &parents,
+        owners: &owners,
     };
     let root = place_area(&board.root, &mut ctx, true);
     let mut layout = Layout::default();
@@ -229,6 +233,9 @@ struct Ctx<'a, 'm> {
     aspect: &'a Aspect<'a>,
     title_h: f32,
     linked: &'a HashSet<String>,
+    /// Child -> parent, for cards and areas in a hierarchy (see `tree::hierarchy`).
+    parents: &'a tree::Parents,
+    owners: &'a HashMap<String, String>,
 }
 
 fn place_card(card: &Card, ctx: &mut Ctx<'_, '_>, fixed: Option<f32>) -> Placed {
@@ -302,11 +309,39 @@ fn place_area(area: &Area, ctx: &mut Ctx<'_, '_>, root: bool) -> Placed {
     } else {
         GAP
     };
-    let sizes: Vec<(Vec2, Option<Vec2>)> = items
-        .iter()
-        .map(|(p, m)| (p.rest, m.map(|(x, y)| vec2(x as f32, y as f32))))
-        .collect();
-    let positions = pack_best(&sizes, gap, root);
+    // A hierarchy among the items is arranged as a tree, which then packs as one block.
+    let ids: Vec<&str> = items.iter().map(|(p, _)| p.id.as_str()).collect();
+    let rests: Vec<Vec2> = items.iter().map(|(p, _)| p.rest).collect();
+    let manual: Vec<bool> = items.iter().map(|(_, m)| m.is_some()).collect();
+    let blocks = tree_blocks(&area.id, &ids, &rests, &manual, ctx, gap);
+    let mut in_block: Vec<Option<(usize, Vec2)>> = vec![None; items.len()];
+    for (b, block) in blocks.iter().enumerate() {
+        for &(i, at) in &block.members {
+            in_block[i] = Some((b, at));
+        }
+    }
+    let mut sizes: Vec<(Vec2, Option<Vec2>)> = Vec::new();
+    let mut slot_of: Vec<usize> = Vec::new();
+    for (i, (p, m)) in items.iter().enumerate() {
+        match in_block[i] {
+            Some((b, _)) if blocks[b].root != i => continue,
+            Some((b, _)) => sizes.push((blocks[b].size, None)),
+            None => sizes.push((p.rest, m.map(|(x, y)| vec2(x as f32, y as f32)))),
+        }
+        slot_of.push(i);
+    }
+    let packed = pack_best(&sizes, gap, root);
+    let mut positions = vec![Vec2::ZERO; items.len()];
+    for (slot, &i) in slot_of.iter().enumerate() {
+        match in_block[i] {
+            Some((b, _)) => {
+                for &(m, at) in &blocks[b].members {
+                    positions[m] = packed[slot] + at;
+                }
+            }
+            None => positions[i] = packed[slot],
+        }
+    }
     let mut placed = Vec::new();
     let mut max = Vec2::ZERO;
     let mut rest_max = Vec2::ZERO;
@@ -354,6 +389,131 @@ fn place_area(area: &Area, ctx: &mut Ctx<'_, '_>, root: bool) -> Placed {
         origin,
         children: placed,
     }
+}
+
+/// A hierarchy among one area's items, arranged as a tree: the root on top, its children
+/// centered in a row below, and so on.
+struct Block {
+    root: usize,
+    size: Vec2,
+    /// Item index and its position inside the block.
+    members: Vec<(usize, Vec2)>,
+}
+
+fn tree_blocks(
+    area: &str,
+    ids: &[&str],
+    sizes: &[Vec2],
+    manual: &[bool],
+    ctx: &Ctx<'_, '_>,
+    gap: f32,
+) -> Vec<Block> {
+    let index: HashMap<&str, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+    // The item of this area that holds `id` (itself, or the area or card it sits in).
+    let item_of = |id: &str| -> Option<usize> {
+        let mut cur = id;
+        for _ in 0..64 {
+            let owner = ctx.owners.get(cur)?;
+            if owner == area {
+                return index.get(cur).copied();
+            }
+            cur = owner;
+        }
+        None
+    };
+    let mut edges: Vec<(usize, usize)> = ctx
+        .parents
+        .iter()
+        .filter_map(|(c, p)| Some((item_of(c)?, item_of(p)?)))
+        .filter(|(c, p)| c != p)
+        .collect();
+    edges.sort();
+    let mut parent: Vec<Option<usize>> = vec![None; ids.len()];
+    for (c, p) in edges {
+        let mut cur = Some(p);
+        let mut cycle = false;
+        while let Some(x) = cur {
+            if x == c {
+                cycle = true;
+                break;
+            }
+            cur = parent[x];
+        }
+        if parent[c].is_none() && !cycle {
+            parent[c] = Some(p);
+        }
+    }
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); ids.len()];
+    for (c, p) in parent.iter().enumerate() {
+        if let Some(p) = p {
+            children[*p].push(c);
+        }
+    }
+    let mut out = Vec::new();
+    for r in 0..ids.len() {
+        if parent[r].is_some() || children[r].is_empty() {
+            continue;
+        }
+        let mut members = Vec::new();
+        let mut stack = vec![r];
+        while let Some(x) = stack.pop() {
+            members.push(x);
+            stack.extend(&children[x]);
+        }
+        // Lone pairs stay in the flow, unless they are all there is; hand-placed items win.
+        let n = members.len();
+        if (n < 3 && n < ids.len()) || members.iter().any(|&m| manual[m]) {
+            continue;
+        }
+        let (size, members) = arrange(r, &children, sizes, gap, LINKED_GAP.max(gap));
+        out.push(Block {
+            root: r,
+            size,
+            members,
+        });
+    }
+    out
+}
+
+/// A laid-out subtree: its size, and each item with its position inside it.
+type Subtree = (Vec2, Vec<(usize, Vec2)>);
+
+/// Lays out the tree under `i`: returns its size and where each item goes.
+fn arrange(i: usize, children: &[Vec<usize>], sizes: &[Vec2], gap_x: f32, gap_y: f32) -> Subtree {
+    let me = sizes[i];
+    if children[i].is_empty() {
+        return (me, vec![(i, Vec2::ZERO)]);
+    }
+    let subs: Vec<Subtree> = children[i]
+        .iter()
+        .map(|&c| arrange(c, children, sizes, gap_x, gap_y))
+        .collect();
+    // Many children wrap into rows of at most five.
+    const PER_ROW: usize = 5;
+    let rows: Vec<&[Subtree]> = {
+        let n = subs.len();
+        let per = n.div_ceil(n.div_ceil(PER_ROW));
+        subs.chunks(per).collect()
+    };
+    let row_w = |row: &[Subtree]| {
+        row.iter().map(|(s, _)| s.x).sum::<f32>() + gap_x * (row.len() as f32 - 1.0)
+    };
+    let width = rows.iter().map(|r| row_w(r)).fold(me.x, f32::max);
+    let mut members = vec![(i, vec2((width - me.x) / 2.0, 0.0))];
+    let mut y = me.y + gap_y;
+    for row in &rows {
+        let mut x = (width - row_w(row)) / 2.0;
+        let mut h = 0.0f32;
+        for (size, sub) in row.iter() {
+            for &(m, at) in sub {
+                members.push((m, at + vec2(x, y)));
+            }
+            x += size.x + gap_x;
+            h = h.max(size.y);
+        }
+        y += h + gap_x;
+    }
+    (vec2(width, y - gap_x), members)
 }
 
 /// Packs items for the best shape: tries a range of widths and keeps the one that fits a

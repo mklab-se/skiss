@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Arrows avoid passing under cards (so they never seem to point at the wrong one), avoid loops,
   and stay inside the board. The opening view includes them.
 - Typing in a card only nudges the cards it covers; the rest of the board stays put.
+- Hierarchies lay out as trees, with nothing to configure. When one kind of connection (such
+  as "Reports to", "Part of" or "Manages") gives every card at most one parent, has no cycles
+  and links at least three cards, parents go on top with their children centered below. This
+  works inside an area and between areas, so an org chart reads like one.
 - Resizing cards and areas from a corner grip; pasting copied cards between boards keeps them
   cards.
 

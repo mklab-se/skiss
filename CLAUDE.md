@@ -50,7 +50,8 @@ A two-crate Cargo workspace:
     - `view.rs`: the board view: painting, pointer/keyboard, editing, toolbar, prompts, overlays.
     - `editor.rs`: rich-text card editing on characters with styles (never on Markdown).
     - `content.rs`: text layout of a card (shared by measuring, drawing and caret hit-testing).
-    - `layout.rs`: world layout (shelf packing in document order, around hand-placed items).
+    - `layout.rs`: world layout: skyline packing in document order at the width that fits a
+      window best, hierarchies as trees, around hand-placed items.
     - `motion.rs`: springs for every node, the camera; nothing repaints once settled.
     - `document.rs`: the open file: autosave (250 ms), file watching (notify), undo/redo.
     - `theme.rs`, `fonts.rs`, `draw.rs`, `images.rs`: looks, bundled OFL fonts, pencil lines, pictures.
@@ -67,6 +68,8 @@ A two-crate Cargo workspace:
     - `model.rs`: `Board::parse`: areas, cards, lines, connections, anchors (GitHub slugs).
     - `inline.rs`: spans with styles, and back to Markdown.
     - `appendix.rs`: the `<!-- skiss ... -->` decoration comment.
+    - `tree.rs`: hierarchies found in connections (one parent each, no cycles), which the layout
+      arranges as trees.
     - `edit.rs`: every change as a minimal splice of the source (text, cards, connections, moves,
       groups, tasks, appendix). Unchanged lines are copied verbatim; never write trailing spaces.
   - `config.rs`: YAML `Config` in `paths::config_dir()` (the chosen theme).
