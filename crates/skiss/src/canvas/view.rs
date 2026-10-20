@@ -3459,13 +3459,19 @@ impl BoardView {
             PromptKind::NewArea { .. } => "Name the new area",
         };
         let mut picked: Option<String> = None;
+        // Prompts look like part of the theme: a paper card in Sketchbook, dark in Ember.
+        let pc = PromptColors::of(theme);
         let first_frame = prompt.focus;
         let shown = egui::Area::new(egui::Id::unique("skiss-prompt"))
             .fixed_pos(prompt.anchor)
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
                 egui::Frame::new()
-                    .fill(theme.ui_bg)
+                    .fill(pc.bg)
+                    .stroke(Stroke::new(
+                        if theme.dark { 0.0 } else { 1.5 },
+                        theme.card_stroke,
+                    ))
                     .corner_radius(10.0)
                     .inner_margin(egui::Margin::same(10))
                     .shadow(egui::Shadow {
@@ -3476,15 +3482,11 @@ impl BoardView {
                     })
                     .show(ui, |ui| {
                         ui.set_max_width(260.0);
-                        ui.label(
-                            egui::RichText::new(title)
-                                .color(theme.ui_text.gamma_multiply(0.7))
-                                .size(12.0),
-                        );
+                        ui.label(egui::RichText::new(title).color(pc.muted).size(12.0));
                         let edit = egui::TextEdit::singleline(&mut prompt.text)
                             .desired_width(240.0)
-                            .text_color(theme.ui_text)
-                            .background_color(Color32::from_white_alpha(16))
+                            .text_color(pc.text)
+                            .background_color(pc.field)
                             .hint_text(match prompt.kind {
                                 PromptKind::Label { .. } | PromptKind::Relabel { .. } => {
                                     "reports to"
@@ -3528,11 +3530,9 @@ impl BoardView {
                                     if ui
                                         .add(
                                             egui::Button::new(
-                                                egui::RichText::new(s)
-                                                    .color(theme.ui_text)
-                                                    .size(13.0),
+                                                egui::RichText::new(s).color(pc.text).size(13.0),
                                             )
-                                            .fill(theme.ui_text.gamma_multiply(0.14))
+                                            .fill(pc.chip)
                                             .stroke(Stroke::NONE)
                                             .corner_radius(8.0),
                                         )
@@ -3842,4 +3842,35 @@ fn distance_to(pts: &[Pos2], p: Pos2) -> f32 {
             (a + ab * t - p).length()
         })
         .fold(f32::INFINITY, f32::min)
+}
+
+/// Colors of the small prompts (connection labels, titles, color names).
+struct PromptColors {
+    bg: Color32,
+    text: Color32,
+    muted: Color32,
+    field: Color32,
+    chip: Color32,
+}
+
+impl PromptColors {
+    fn of(theme: &Theme) -> Self {
+        if theme.dark {
+            PromptColors {
+                bg: theme.ui_bg,
+                text: theme.ui_text,
+                muted: theme.ui_text.gamma_multiply(0.65),
+                field: Color32::from_white_alpha(16),
+                chip: Color32::from_white_alpha(22),
+            }
+        } else {
+            PromptColors {
+                bg: theme.card_fill,
+                text: theme.text,
+                muted: theme.muted,
+                field: Color32::WHITE,
+                chip: Color32::from_rgba_unmultiplied(60, 40, 20, 20),
+            }
+        }
+    }
 }

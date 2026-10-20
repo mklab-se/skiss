@@ -295,8 +295,15 @@ fn apply_visuals(ctx: &egui::Context, theme: &Theme) {
     } else {
         Color32::WHITE
     };
-    v.selection.bg_fill = theme.accent.gamma_multiply(0.5);
-    v.selection.stroke.color = theme.accent;
+    // Selected text: dark ink on warm amber (Sketchbook), white on ember (Ember). egui also
+    // uses the selection stroke for a focused field's border.
+    if theme.dark {
+        v.selection.bg_fill = Color32::from_rgb(0xb8, 0x3a, 0x14);
+        v.selection.stroke.color = Color32::WHITE;
+    } else {
+        v.selection.bg_fill = Color32::from_rgb(0xf6, 0xcf, 0x6a);
+        v.selection.stroke.color = theme.text;
+    }
     v.hyperlink_color = theme.link;
     ctx.set_visuals(v);
 }
