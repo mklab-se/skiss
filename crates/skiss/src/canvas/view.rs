@@ -158,7 +158,7 @@ pub struct BoardView {
     /// AI requests in flight.
     ai_jobs: Vec<ai::Job>,
     /// Chosen arrow sides per connection, with the card rects they were chosen for.
-    route_cache: HashMap<(String, String), (Rect, Rect, u64, (u8, u8))>,
+    route_cache: HashMap<(String, String), Route>,
     /// The AI menu under the toolbar, and where it opens.
     ai_menu: Option<Pos2>,
 }
@@ -170,6 +170,10 @@ struct Search {
     index: usize,
     focus: bool,
 }
+
+/// Arrow sides chosen for a connection: the two card rects and the layout they were chosen
+/// for, and the sides.
+type Route = (Rect, Rect, u64, (u8, u8));
 
 /// A connection label to draw on top of the cards.
 type Label = (Rect, std::sync::Arc<egui::Galley>, Color32);
