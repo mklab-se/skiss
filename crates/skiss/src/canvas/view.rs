@@ -496,6 +496,7 @@ impl BoardView {
                 &aspect,
                 area_h,
                 theme.board_title_size,
+                theme.body_size * self.text_scale,
                 theme.tilt,
             )
         });
@@ -2607,15 +2608,15 @@ impl BoardView {
         let origin = sr.min + Vec2::splat(pad);
         let mut best: Option<(&content::Row, f32)> = None;
         for row in &text.rows {
-            let top = origin.y + row.offset.y * k;
-            let bottom = top + row.galley.size().y.max(row.size.y) * k;
-            let d = if at.y < top {
-                top - at.y
-            } else if at.y > bottom {
-                at.y - bottom
-            } else {
-                0.0
-            };
+            // Distance to the row's box, so a click finds the right column too.
+            let size = vec2(
+                row.galley.size().x.max(row.size.x),
+                row.galley.size().y.max(row.size.y),
+            ) * *k;
+            let r = Rect::from_min_size(origin + row.offset * *k, size);
+            let dy = (r.min.y - at.y).max(at.y - r.max.y).max(0.0);
+            let dx = (r.min.x - at.x).max(at.x - r.max.x).max(0.0);
+            let d = dy + dx * 0.25;
             if best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((row, d));
             }

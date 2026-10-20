@@ -6,6 +6,8 @@
 use std::collections::{HashMap, HashSet};
 
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
+
+use super::content;
 use skiss_core::board::{Appendix, Area, Board, Card, CardKind, LineKind, Node, tree};
 
 pub const CARD_PAD: f32 = 16.0;
@@ -76,7 +78,9 @@ const SCREEN_ASPECT: f32 = 1.6;
 /// The shape areas aim for.
 const AREA_ASPECT: f32 = 1.5;
 
-pub fn card_width(card: &Card, aspect: &Aspect<'_>) -> f32 {
+/// How wide a card is: by what it holds. `column` is one comfortable column of text (world
+/// units, at the current text size) and `gap` the space between columns.
+pub fn card_width(card: &Card, aspect: &Aspect<'_>, column: f32, gap: f32) -> f32 {
     let image = card.lines.iter().find_map(|l| match &l.kind {
         LineKind::Image { url, .. } => Some(url.as_str()),
         _ => None,
@@ -105,9 +109,18 @@ pub fn card_width(card: &Card, aspect: &Aspect<'_>) -> f32 {
                 .sum::<usize>()
         })
         .sum();
+    // Long writing gets as many columns as keep the card about as wide as it is tall: a page
+    // of prose reads like a newspaper spread, not a scroll.
+    let cols = match words {
+        0..=150 => 0,
+        151..=420 => 2,
+        _ => 3,
+    };
+    if cols > 0 && !has_image {
+        return column * cols as f32 + gap * (cols as f32 - 1.0) + CARD_PAD * 2.0;
+    }
     match card.kind {
         _ if has_image => 340.0,
-        _ if words > 150 => 520.0,
         _ if has_code => 360.0,
         CardKind::Section => 270.0,
         CardKind::Block => 300.0,
@@ -134,6 +147,7 @@ pub fn compute(
     aspect: &Aspect<'_>,
     area_title_h: f32,
     board_title_size: f32,
+    body: f32,
     tilt: f32,
 ) -> Layout {
     let app = &board.appendix;
@@ -149,6 +163,8 @@ pub fn compute(
         measure,
         aspect,
         title_h: area_title_h,
+        column: body * content::COLUMN_EMS,
+        column_gap: body * content::COLUMN_GAP_EMS,
         linked: &linked,
         parents: &parents,
         owners: &owners,
@@ -232,6 +248,9 @@ struct Ctx<'a, 'm> {
     measure: &'a mut Measure<'m>,
     aspect: &'a Aspect<'a>,
     title_h: f32,
+    /// One comfortable column of text, and the gap between columns (world units).
+    column: f32,
+    column_gap: f32,
     linked: &'a HashSet<String>,
     /// Child -> parent, for cards and areas in a hierarchy (see `tree::hierarchy`).
     parents: &'a tree::Parents,
@@ -240,7 +259,7 @@ struct Ctx<'a, 'm> {
 
 fn place_card(card: &Card, ctx: &mut Ctx<'_, '_>, fixed: Option<f32>) -> Placed {
     let app = ctx.app;
-    let mut width = card_width(card, ctx.aspect);
+    let mut width = card_width(card, ctx.aspect, ctx.column, ctx.column_gap);
     if let Some((w, _)) = app.get(&card.key).and_then(|e| e.size) {
         width = (w as f32).max(160.0);
     }

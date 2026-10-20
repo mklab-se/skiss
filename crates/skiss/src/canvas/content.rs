@@ -142,7 +142,102 @@ pub fn job(
 }
 
 /// Lays out a card's title and lines within `width` (scaled units).
+/// A comfortable line length for card text, in body sizes (about 60 to 70 characters).
+pub const COLUMN_EMS: f32 = 24.0;
+/// The space between two columns, in body sizes.
+pub const COLUMN_GAP_EMS: f32 = 1.6;
+
+/// How many columns of text fit in `width`, for a given body size.
+pub fn columns_for(width: f32, body: f32) -> usize {
+    let col = body * COLUMN_EMS;
+    let gap = body * COLUMN_GAP_EMS;
+    // A hair of slack, so measuring and drawing at another zoom agree.
+    (((width + gap) / (col + gap)) + 0.02).floor().max(1.0) as usize
+}
+
+/// Lays out a card's text. A card wide enough for two or more comfortable lines flows its text
+/// into columns, like a newspaper, so long writing never runs into very long lines; the title
+/// spans the full width.
 pub fn layout(
+    fonts: &mut FontsView<'_>,
+    st: &TextStyle<'_>,
+    title: Option<&[Span]>,
+    lines: &[Line],
+    width: f32,
+    aspect: ImageAspect<'_>,
+) -> CardText {
+    let body = st.body();
+    let n = columns_for(width, body);
+    if n < 2 || lines.len() < 2 {
+        return layout_column(fonts, st, title, lines, width, aspect);
+    }
+    let gap = body * COLUMN_GAP_EMS;
+    let col_w = (width - gap * (n as f32 - 1.0)) / n as f32;
+    let mut out = Vec::new();
+    let mut top = 0.0;
+    if let Some(t) = title {
+        let head = layout_column(fonts, st, Some(t), &[], width, aspect);
+        top = head.size.y + body * 0.3;
+        out.extend(head.rows);
+    }
+    let flow = layout_column(fonts, st, None, lines, col_w, aspect);
+    // Each row owns the space down to the next one (its gap included).
+    let starts: Vec<f32> = flow.rows.iter().map(|r| r.offset.y).collect();
+    let ends: Vec<f32> = (0..starts.len())
+        .map(|i| starts.get(i + 1).copied().unwrap_or(flow.size.y))
+        .collect();
+    let breaks = balance(&starts, &ends, n);
+    let mut height = 0.0f32;
+    let mut col = 0;
+    let mut col_top = 0.0;
+    for (i, mut row) in flow.rows.into_iter().enumerate() {
+        if breaks.contains(&i) {
+            col += 1;
+            col_top = starts[i];
+        }
+        let dx = col as f32 * (col_w + gap);
+        row.offset.x += dx;
+        row.marker_x += dx;
+        row.offset.y += top - col_top;
+        let bottom = row.offset.y + row.galley.size().y.max(row.size.y);
+        height = height.max(bottom.max(top + ends[i] - col_top));
+        out.push(row);
+    }
+    CardText {
+        rows: out,
+        size: Vec2::new(width, height),
+    }
+}
+
+/// Where to start new columns (row indices) so `n` columns come out about equally tall.
+/// Columns break only between rows, never inside a paragraph.
+fn balance(starts: &[f32], ends: &[f32], n: usize) -> Vec<usize> {
+    let total = ends.last().copied().unwrap_or(0.0);
+    let fits = |limit: f32| -> Option<Vec<usize>> {
+        let mut breaks = Vec::new();
+        let mut col_top = 0.0;
+        for i in 0..starts.len() {
+            if ends[i] - col_top > limit && i > 0 && starts[i] > col_top {
+                breaks.push(i);
+                col_top = starts[i];
+                if ends[i] - col_top > limit || breaks.len() >= n {
+                    return None;
+                }
+            }
+        }
+        Some(breaks)
+    };
+    let mut limit = total / n as f32;
+    for _ in 0..200 {
+        if let Some(b) = fits(limit) {
+            return b;
+        }
+        limit += total * 0.01 + 1.0;
+    }
+    Vec::new()
+}
+
+fn layout_column(
     fonts: &mut FontsView<'_>,
     st: &TextStyle<'_>,
     title: Option<&[Span]>,

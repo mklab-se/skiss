@@ -44,7 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A board opens zoomed out to show all of it at once; zoom in from there.
 - Boards look good as they open. The layout packs cards like a masonry wall and picks the shape
   that fills the window. The board title grows with the board. Square and portrait pictures get
-  narrower cards, and long prose gets a reading-width column. Tables stay tables when zoomed
+  narrower cards, and long writing flows into two or three newspaper columns, so lines stay
+  a comfortable length and a page of prose is a spread, not a scroll. Tables stay tables when zoomed
   out. Area names show once at any zoom.
 - Arrows keep their shape at every zoom. They avoid passing under cards (so they never seem to
   point at the wrong one), avoid loops, and stay inside the board. The opening view includes
