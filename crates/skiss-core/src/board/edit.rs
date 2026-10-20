@@ -23,6 +23,11 @@ fn splice(src: &str, range: Range<usize>, with: &str) -> String {
     out
 }
 
+/// Replaces a range of the source (for example one image line) with new text.
+pub fn replace_range(src: &str, range: Range<usize>, with: &str) -> String {
+    splice(src, range, with)
+}
+
 /// Inserts a block of text at a line boundary with one blank line around it.
 /// Returns the new source and the offset where `block` starts.
 pub fn insert_block(src: &str, at: usize, block: &str) -> (String, usize) {
@@ -82,6 +87,7 @@ pub fn lines_to_markdown(src: &str, lines: &[Line], original: &[Line]) -> String
     let mut widths: Vec<usize> = Vec::new();
     let mut prev_list = false;
     let mut first = true;
+    let mut prev_orig: Option<Range<usize>> = None;
     for line in lines {
         let empty = line.spans.iter().all(|s| s.text.trim().is_empty());
         // Empty paragraphs and list items (a fresh line still being typed) are not written:
@@ -91,10 +97,21 @@ pub fn lines_to_markdown(src: &str, lines: &[Line], original: &[Line]) -> String
         }
         let is_list = line.is_list();
         if !first {
-            out.push_str(if is_list && prev_list { "\n" } else { "\n\n" });
+            // Between two lines that sat next to each other in the file, keep the file's own
+            // spacing (a list right under a paragraph stays right under it).
+            let kept = prev_orig
+                .as_ref()
+                .filter(|p| !line.orig.is_empty() && p.end <= line.orig.start)
+                .map(|p| &src[p.end..line.orig.start])
+                .filter(|gap| gap.contains('\n') && gap.trim().is_empty());
+            match kept {
+                Some(gap) => out.push_str(gap),
+                None => out.push_str(if is_list && prev_list { "\n" } else { "\n\n" }),
+            }
         }
         first = false;
         prev_list = is_list;
+        prev_orig = Some(line.orig.clone()).filter(|o| !o.is_empty());
 
         let d = line.depth as usize;
         if is_list {
@@ -984,6 +1001,20 @@ Tech lead.
             out.contains("Sponsor, owns the program.\n- Manages [Erik Lund](#erik-lund)"),
             "{out}"
         );
+    }
+
+    #[test]
+    fn rewritten_lines_keep_the_file_spacing() {
+        let src = "### Offsite\nWe shuold go.\n- [ ] Book the venu\n";
+        let b = Board::parse(src);
+        let card = b.card("offsite").unwrap();
+        let mut lines = card.lines.clone();
+        lines[0].spans = vec![Span::plain("We should go.")];
+        lines[1].spans = vec![Span::plain("Book the venue")];
+        let out = set_card_text(&b, src, "offsite", None, &lines)
+            .unwrap()
+            .source;
+        assert_eq!(out, "### Offsite\nWe should go.\n- [ ] Book the venue\n");
     }
 
     #[test]

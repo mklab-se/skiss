@@ -1,5 +1,6 @@
 //! The canvas window.
 
+mod ai;
 mod app;
 mod content;
 mod document;

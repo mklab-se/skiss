@@ -17,9 +17,9 @@ use ailloy::config_tui;
 
 use crate::cli::AiCommands;
 
-/// The capabilities this tool needs from Ailloy. A bare CLI just needs `chat`;
-/// add more (e.g. `"image"`) as your tool grows.
-const CAPABILITIES: &[&str] = &["chat"];
+/// The capabilities skiss uses: `chat` for spelling, rewriting and translating cards, `image`
+/// for pictures drawn from a card.
+const CAPABILITIES: &[&str] = &["chat", "image"];
 
 pub async fn run(cmd: Option<AiCommands>) -> Result<()> {
     match cmd {

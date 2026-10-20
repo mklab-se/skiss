@@ -10,6 +10,7 @@ use skiss_core::board::edit::{self, Edited};
 use skiss_core::board::query;
 use skiss_core::board::{Board, Card, CardKind, Color, Line, LineKind, NodeRef, Span};
 
+use super::ai;
 use super::content::{self, CardText, Marker, RowKind, TextStyle};
 use super::document::Document;
 use super::draw;
@@ -70,12 +71,32 @@ struct Prompt {
 
 #[derive(Clone)]
 enum PromptKind {
-    Label { from: String, to: String },
-    Relabel { from: String, to: String },
+    Label {
+        from: String,
+        to: String,
+    },
+    Relabel {
+        from: String,
+        to: String,
+    },
     BoardTitle,
-    NewArea { parent: String },
-    AreaTitle { id: String, start: usize },
-    ColorName { color: Color },
+    NewArea {
+        parent: String,
+    },
+    TranslateTo {
+        card: String,
+    },
+    Picture {
+        card: String,
+        replace: Option<std::ops::Range<usize>>,
+    },
+    AreaTitle {
+        id: String,
+        start: usize,
+    },
+    ColorName {
+        color: Color,
+    },
 }
 
 pub struct BoardView {
@@ -126,6 +147,10 @@ pub struct BoardView {
     about: Option<String>,
     /// Ids in focus this frame (search hits, related things), with their areas.
     focus: Option<std::collections::HashSet<String>>,
+    /// AI requests in flight.
+    ai_jobs: Vec<ai::Job>,
+    /// The AI menu under the toolbar, and where it opens.
+    ai_menu: Option<Pos2>,
 }
 
 struct Search {
@@ -181,6 +206,8 @@ impl BoardView {
             search: None,
             about: None,
             focus: None,
+            ai_jobs: Vec::new(),
+            ai_menu: None,
         }
     }
 
@@ -319,6 +346,8 @@ impl BoardView {
 
         // Overlays.
         self.toolbar(ui, screen, theme);
+        self.ai_menu_ui(ui, theme);
+        self.poll_ai(ui);
         self.search_ui(ui, screen, theme);
         self.about_ui(ui, screen, theme);
         if let Some(r) = self.dock(ui, screen, theme) {
@@ -334,7 +363,7 @@ impl BoardView {
         if let Some(wait) = self.doc.autosave(false) {
             ctx.request_repaint_after(wait);
         }
-        if moving || !matches!(self.drag, Drag::None) {
+        if moving || !matches!(self.drag, Drag::None) || !self.ai_jobs.is_empty() {
             ctx.request_repaint();
         }
         if self.editor.is_some() {
@@ -1409,6 +1438,41 @@ impl BoardView {
                 self.paint_editor(p, &text, origin, k, theme, now);
                 self.edit_text = Some((sr, text, k));
             }
+        }
+        // A card the AI is working on shimmers, with a note of what is happening.
+        if let Some(job) = self.ai_jobs.iter().find(|j| j.card_id == id) {
+            let t = (now * 0.9).fract() as f32;
+            let x = sr.min.x - sr.width() * 0.4 + t * sr.width() * 1.8;
+            let band = Rect::from_min_max(pos2(x, sr.min.y), pos2(x + sr.width() * 0.35, sr.max.y))
+                .intersect(sr);
+            if band.is_positive() {
+                let glow = if theme.dark {
+                    Color32::from_rgba_unmultiplied(255, 120, 60, 38)
+                } else {
+                    Color32::from_rgba_unmultiplied(255, 200, 60, 70)
+                };
+                let mut mesh = egui::Mesh::default();
+                let i = mesh.vertices.len() as u32;
+                mesh.colored_vertex(band.left_top(), Color32::TRANSPARENT);
+                mesh.colored_vertex(pos2(band.center().x, band.min.y), glow);
+                mesh.colored_vertex(band.right_top(), Color32::TRANSPARENT);
+                mesh.colored_vertex(band.right_bottom(), Color32::TRANSPARENT);
+                mesh.colored_vertex(pos2(band.center().x, band.max.y), glow);
+                mesh.colored_vertex(band.left_bottom(), Color32::TRANSPARENT);
+                mesh.add_triangle(i, i + 1, i + 4);
+                mesh.add_triangle(i, i + 4, i + 5);
+                mesh.add_triangle(i + 1, i + 2, i + 3);
+                mesh.add_triangle(i + 1, i + 3, i + 4);
+                p.add(Shape::mesh(mesh));
+            }
+            let dots = ".".repeat(1 + ((now * 2.0) as usize % 3));
+            p.text(
+                pos2(sr.center().x, sr.max.y + 12.0),
+                Align2::CENTER_TOP,
+                format!("AI · {}{dots}", job.label),
+                FontId::proportional(13.0),
+                theme.muted,
+            );
         }
         // Handles for connecting.
         self.paint_handles(p, id, sr, theme);
@@ -2810,6 +2874,18 @@ impl BoardView {
             }
             Key::G if m.command => self.group_selected(screen),
             Key::F if m.command => self.open_search(),
+            Key::A
+                if !m.command
+                    && self.selection.len() == 1
+                    && self.doc.board.card(&self.selection[0]).is_some() =>
+            {
+                let at = self
+                    .motion
+                    .rect(&self.selection[0])
+                    .map(|r| self.camera.rect_to_screen(screen, r).center_top())
+                    .unwrap_or(screen.center());
+                self.ai_menu = Some(at);
+            }
             Key::R if !m.command => {
                 if let Some(id) = self.selection.first().cloned() {
                     self.about = if self.about.as_deref() == Some(id.as_str()) {
@@ -3161,6 +3237,8 @@ impl BoardView {
             (bounds.min.y - 12.0).max(screen.min.y + 40.0),
         );
         let editing = self.editor.is_some();
+        let single_card =
+            self.selection.len() == 1 && self.doc.board.card(&self.selection[0]).is_some();
         let mut actions: Vec<ToolbarAction> = Vec::new();
         let current_color = self.selection.first().and_then(|id| {
             let key = self.doc.board.node(id)?.key().to_string();
@@ -3270,6 +3348,16 @@ impl BoardView {
                             {
                                 actions.push(ToolbarAction::Related);
                             }
+                            if !editing
+                                && single_card
+                                && tb(
+                                    ui,
+                                    egui::RichText::new("AI").size(13.0),
+                                    "Spelling, rewriting, translating, pictures",
+                                )
+                            {
+                                actions.push(ToolbarAction::Ai);
+                            }
                             if tb(ui, egui::RichText::new("Delete").size(13.0), "Delete (⌫)") {
                                 actions.push(ToolbarAction::Delete);
                             }
@@ -3277,6 +3365,7 @@ impl BoardView {
                     });
             });
         let now = ui.input(|i| i.time);
+        let toolbar_bottom = pos2(pos.x, pos.y + 6.0);
         for a in actions {
             match a {
                 ToolbarAction::Bold
@@ -3325,6 +3414,13 @@ impl BoardView {
                 }
                 ToolbarAction::Related => {
                     self.about = self.selection.first().cloned();
+                }
+                ToolbarAction::Ai => {
+                    self.ai_menu = if self.ai_menu.is_some() {
+                        None
+                    } else {
+                        Some(toolbar_bottom)
+                    };
                 }
             }
         }
@@ -3708,6 +3804,314 @@ impl BoardView {
         }
     }
 
+    /// The card's title and body as Markdown, without its connection sentences.
+    fn card_markdown(&self, id: &str) -> Option<(usize, Option<String>, String)> {
+        let card = self.doc.board.card(id)?;
+        let body = edit::lines_to_markdown(&self.doc.source, &card.lines, &card.lines);
+        Some((
+            card.range.start,
+            card.heading.as_ref().map(|h| h.text.clone()),
+            body,
+        ))
+    }
+
+    fn start_rewrite(&mut self, ctx: &egui::Context, id: &str, how: ai::Rewrite) {
+        if !ai::available() {
+            self.toast = Some((
+                "AI is not set up: run `skiss ai config` in a terminal".into(),
+                self.last_time.unwrap_or(0.0),
+            ));
+            return;
+        }
+        let Some((start, title, body)) = self.card_markdown(id) else {
+            return;
+        };
+        if self.ai_jobs.iter().any(|j| j.card_id == id) {
+            return;
+        }
+        self.ai_jobs
+            .push(ai::rewrite(ctx, how, start, id, title, body));
+    }
+
+    fn start_picture(
+        &mut self,
+        ctx: &egui::Context,
+        id: &str,
+        prompt: String,
+        replace: Option<std::ops::Range<usize>>,
+    ) {
+        if !ai::available() {
+            self.toast = Some((
+                "AI is not set up: run `skiss ai config` in a terminal".into(),
+                self.last_time.unwrap_or(0.0),
+            ));
+            return;
+        }
+        let Some(card) = self.doc.board.card(id) else {
+            return;
+        };
+        let start = card.range.start;
+        self.ai_jobs
+            .push(ai::picture(ctx, prompt, start, id, replace));
+    }
+
+    /// Applies finished AI requests as ordinary edits.
+    fn poll_ai(&mut self, ui: &Ui) {
+        let mut done = Vec::new();
+        for (i, job) in self.ai_jobs.iter().enumerate() {
+            if let Some(out) = job.poll() {
+                done.push((i, out));
+            }
+        }
+        for (i, out) in done.into_iter().rev() {
+            let job = self.ai_jobs.remove(i);
+            let now = ui.input(|x| x.time);
+            let out = match out {
+                Ok(o) => o,
+                Err(e) => {
+                    self.toast = Some((format!("AI: {e}"), now));
+                    continue;
+                }
+            };
+            // The card may have moved in the file since; find it again.
+            let id = edit::node_at(&self.doc.board, job.card_start)
+                .map(|n| n.id().to_string())
+                .filter(|_| true)
+                .or_else(|| self.doc.board.card(&job.card_id).map(|c| c.id.clone()));
+            let Some(id) = id else { continue };
+            match out {
+                ai::Outcome::Text { title, body } => {
+                    let mut lines = skiss_core::board::model::body_lines(&body);
+                    // Line by line, the rewrite stands where the old line stood (keeps spacing).
+                    if let Some(card) = self.doc.board.card(&id) {
+                        for (new, old) in lines.iter_mut().zip(&card.lines) {
+                            if new.kind == old.kind && new.depth == old.depth {
+                                new.orig = old.orig.clone();
+                            }
+                        }
+                    }
+                    let keep_title = self
+                        .doc
+                        .board
+                        .card(&id)
+                        .and_then(|c| c.heading.as_ref())
+                        .is_some();
+                    let title = if keep_title { title } else { None };
+                    if let Some(Edited { source, .. }) = edit::set_card_text(
+                        &self.doc.board,
+                        &self.doc.source,
+                        &id,
+                        title.as_deref(),
+                        &lines,
+                    ) {
+                        self.doc.break_coalescing();
+                        self.doc.apply(source, &self.selection, None);
+                        self.toast = Some(("Done. ⌘Z undoes it".into(), now));
+                    } else {
+                        self.toast = Some(("Nothing to change".into(), now));
+                    }
+                }
+                ai::Outcome::Image { bytes, ext } => {
+                    let rel = match ai::save_picture(
+                        &self.doc.assets_dir(),
+                        &self.doc.dir(),
+                        &bytes,
+                        ext,
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            self.toast = Some((format!("Could not save the picture: {e}"), now));
+                            continue;
+                        }
+                    };
+                    let alt = job
+                        .prompt
+                        .clone()
+                        .unwrap_or_default()
+                        .replace(['[', ']', '\n'], " ");
+                    let md = format!("![{}]({rel})", alt.trim());
+                    let result = match &job.replace {
+                        Some(r) => Some(edit::replace_range(&self.doc.source, r.clone(), &md)),
+                        None => match self.doc.board.card(&id) {
+                            Some(c) if c.kind == CardKind::Section => {
+                                edit::append_to_card(&self.doc.board, &self.doc.source, &id, &md)
+                                    .map(|e| e.source)
+                            }
+                            _ => {
+                                let area = self
+                                    .doc
+                                    .board
+                                    .parent_area(&id)
+                                    .map(|a| a.id.clone())
+                                    .unwrap_or_default();
+                                edit::insert_loose(&self.doc.board, &self.doc.source, &area, &md)
+                                    .map(|e| e.source)
+                            }
+                        },
+                    };
+                    if let Some(src) = result {
+                        self.doc.break_coalescing();
+                        self.doc.apply(src, &self.selection, None);
+                        self.images.forget_all();
+                    }
+                }
+            }
+        }
+    }
+
+    fn ai_menu_ui(&mut self, ui: &mut Ui, theme: &Theme) {
+        let Some(at) = self.ai_menu else { return };
+        let Some(id) = self
+            .selection
+            .first()
+            .cloned()
+            .filter(|_| self.selection.len() == 1)
+        else {
+            self.ai_menu = None;
+            return;
+        };
+        let Some(card) = self.doc.board.card(&id) else {
+            self.ai_menu = None;
+            return;
+        };
+        let image_line = card.lines.iter().find_map(|l| match &l.kind {
+            skiss_core::board::LineKind::Image { alt, .. } => Some((alt.clone(), l.orig.clone())),
+            _ => None,
+        });
+        let text_prompt = {
+            let mut t = card.title().unwrap_or("").to_string();
+            for l in &card.lines {
+                if !l.kind.is_atom() {
+                    t.push_str(". ");
+                    t.push_str(&l.text());
+                }
+            }
+            t.trim_matches(['.', ' ']).to_string()
+        };
+        let pc = PromptColors::of(theme);
+        let available = ai::available();
+        let mut pick: Option<&str> = None;
+        let mut targets: Vec<(String, Rect)> = Vec::new();
+        let shown = egui::Area::new(egui::Id::unique("skiss-ai-menu"))
+            .fixed_pos(at)
+            .pivot(Align2::CENTER_TOP)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::new()
+                    .fill(pc.bg)
+                    .stroke(Stroke::new(
+                        if theme.dark { 0.0 } else { 1.5 },
+                        theme.card_stroke,
+                    ))
+                    .corner_radius(10.0)
+                    .inner_margin(egui::Margin::same(8))
+                    .shadow(egui::Shadow {
+                        offset: [0, 4],
+                        blur: 16,
+                        spread: 0,
+                        color: Color32::from_black_alpha(60),
+                    })
+                    .show(ui, |ui| {
+                        ui.set_width(220.0);
+                        let mut item = |ui: &mut Ui, label: &str, key: &'static str| {
+                            let b = egui::Button::new(
+                                egui::RichText::new(label).size(14.0).color(pc.text),
+                            )
+                            .frame(false)
+                            .min_size(vec2(210.0, 24.0));
+                            let r = ui.add(b);
+                            targets.push((format!("ai-{key}"), r.rect));
+                            if r.clicked() {
+                                pick = Some(key);
+                            }
+                        };
+                        if !available {
+                            ui.label(
+                                egui::RichText::new("AI is not set up for skiss yet.")
+                                    .color(pc.text),
+                            );
+                            ui.label(
+                                egui::RichText::new(
+                                    "Run `skiss ai config` (and `skiss ai enable`) in a terminal.",
+                                )
+                                .size(12.5)
+                                .color(pc.muted),
+                            );
+                            return;
+                        }
+                        item(ui, "Fix spelling", "spell");
+                        item(ui, "Make it clearer", "clear");
+                        item(ui, "Shorten", "short");
+                        ui.separator();
+                        item(ui, "Translate to English", "en");
+                        item(ui, "Translate to Swedish", "sv");
+                        item(ui, "Translate to…", "other");
+                        ui.separator();
+                        item(ui, "Picture from this card", "pic");
+                        if image_line.is_some() {
+                            item(ui, "Redraw the picture", "redraw");
+                        }
+                    });
+            });
+        self.dock_buttons.retain(|(k, _)| !k.starts_with("ai-"));
+        self.dock_buttons.extend(targets);
+        let outside = ui.input(|i| {
+            i.pointer.any_pressed()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| !shown.response.rect.expand(4.0).contains(p))
+        });
+        let Some(key) = pick else {
+            if outside {
+                self.ai_menu = None;
+            }
+            return;
+        };
+        self.ai_menu = None;
+        let ctx = ui.ctx().clone();
+        let anchor = at + vec2(-130.0, 10.0);
+        match key {
+            "spell" => self.start_rewrite(&ctx, &id, ai::Rewrite::Spelling),
+            "clear" => self.start_rewrite(&ctx, &id, ai::Rewrite::Clearer),
+            "short" => self.start_rewrite(&ctx, &id, ai::Rewrite::Shorter),
+            "en" => self.start_rewrite(&ctx, &id, ai::Rewrite::Translate("English".into())),
+            "sv" => self.start_rewrite(&ctx, &id, ai::Rewrite::Translate("Swedish".into())),
+            "other" => {
+                self.prompt = Some(Prompt {
+                    kind: PromptKind::TranslateTo { card: id },
+                    text: String::new(),
+                    anchor,
+                    focus: true,
+                })
+            }
+            "pic" => {
+                self.prompt = Some(Prompt {
+                    kind: PromptKind::Picture {
+                        card: id,
+                        replace: None,
+                    },
+                    text: text_prompt,
+                    anchor,
+                    focus: true,
+                })
+            }
+            "redraw" => {
+                if let Some((alt, range)) = image_line {
+                    self.prompt = Some(Prompt {
+                        kind: PromptKind::Picture {
+                            card: id,
+                            replace: Some(range),
+                        },
+                        text: alt,
+                        anchor,
+                        focus: true,
+                    })
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The dock at the bottom: the main things you can make, always in reach.
     fn dock(&mut self, ui: &mut Ui, screen: Rect, theme: &Theme) -> Option<UiRequest> {
         let mut act: Option<&str> = None;
@@ -3789,7 +4193,8 @@ impl BoardView {
                         });
                     });
             });
-        self.dock_buttons = rects;
+        self.dock_buttons.retain(|(k, _)| k.starts_with("ai-"));
+        self.dock_buttons.extend(rects);
         let now = ui.input(|i| i.time);
         let anchor = shown.response.rect.center_top() + vec2(-130.0, -96.0);
         match act {
@@ -3869,6 +4274,8 @@ impl BoardView {
             PromptKind::Relabel { .. } => "How are they connected?",
             PromptKind::BoardTitle => "Board title",
             PromptKind::NewArea { .. } => "Name the new area",
+            PromptKind::TranslateTo { .. } => "Translate into which language?",
+            PromptKind::Picture { .. } => "Describe the picture",
         };
         let mut picked: Option<String> = None;
         // Prompts look like part of the theme: a paper card in Sketchbook, dark in Ember.
@@ -3905,6 +4312,8 @@ impl BoardView {
                                 }
                                 PromptKind::AreaTitle { .. } | PromptKind::BoardTitle => "Untitled",
                                 PromptKind::NewArea { .. } => "People",
+                                PromptKind::TranslateTo { .. } => "German",
+                                PromptKind::Picture { .. } => "A pencil sketch of...",
                                 PromptKind::ColorName { .. } => "Blocked",
                             })
                             .font(FontId::proportional(16.0));
@@ -4020,6 +4429,18 @@ impl BoardView {
                     self.doc.apply(src, &self.selection, None);
                 }
                 self.selected_conn = Some((from, to));
+            }
+            PromptKind::TranslateTo { card } => {
+                let lang = prompt.text.trim().to_string();
+                if !lang.is_empty() {
+                    self.start_rewrite(ui.ctx(), &card, ai::Rewrite::Translate(lang));
+                }
+            }
+            PromptKind::Picture { card, replace } => {
+                let p = prompt.text.trim().to_string();
+                if !p.is_empty() {
+                    self.start_picture(ui.ctx(), &card, p, replace);
+                }
             }
             PromptKind::NewArea { parent } => {
                 let name = if prompt.text.trim().is_empty() {
@@ -4137,6 +4558,7 @@ impl BoardView {
             ("Shift-drag", "select several"),
             ("⌘F", "search (Enter for the next hit)"),
             ("R", "everything about the selected card"),
+            ("A", "AI: spelling, rewriting, translating, pictures"),
             ("⌘G", "group into a new area"),
             ("⌘⇧L", "tidy up the layout"),
             ("⌘B  ⌘I  ⌘E", "bold, italic, code"),
@@ -4199,6 +4621,7 @@ enum ToolbarAction {
     Edit,
     Delete,
     Related,
+    Ai,
 }
 
 pub enum UiRequest {
