@@ -1994,6 +1994,24 @@ impl BoardView {
             match self.hot_at(at) {
                 Some(Hot::Link { url }) => {
                     ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                    // Where the link goes: the card it points at, or the address itself.
+                    let (target, action) = match url.strip_prefix('#') {
+                        Some(anchor) => {
+                            let title = self
+                                .doc
+                                .board
+                                .anchors
+                                .get(anchor)
+                                .and_then(|id| self.doc.board.node(id))
+                                .and_then(|n| n.heading())
+                                .map(|h| h.text.clone());
+                            match title {
+                                Some(t) => (format!("→ {t}"), "Click to go there"),
+                                None => (format!("{url} (no such card)"), "Nothing to go to"),
+                            }
+                        }
+                        None => (url.to_string(), "Click to open"),
+                    };
                     egui::Tooltip::always_open(
                         ui.ctx().clone(),
                         ui.layer_id(),
@@ -2001,11 +2019,13 @@ impl BoardView {
                         egui::PopupAnchor::Pointer,
                     )
                     .show(|ui| {
-                        ui.label(if url.starts_with('#') {
-                            "Click to go there".to_string()
-                        } else {
-                            format!("{url}\nClick to open")
-                        });
+                        ui.set_max_width(520.0);
+                        ui.label(egui::RichText::new(target).size(14.0).color(theme.ui_text));
+                        ui.label(
+                            egui::RichText::new(action)
+                                .size(12.0)
+                                .color(theme.ui_text.gamma_multiply(0.6)),
+                        );
                     });
                 }
                 Some(Hot::Resize { .. }) => ui.ctx().set_cursor_icon(CursorIcon::ResizeNwSe),
