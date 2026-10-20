@@ -1232,3 +1232,83 @@ Agreed on an API freeze by 1 November.
         assert_eq!(b.connections()[0].1, "team-b");
     }
 }
+
+#[cfg(test)]
+mod demo {
+    use super::*;
+
+    /// The demo boards in `examples/` stay valid: every arrow points at a real card, every
+    /// decorated key exists, and opening a board changes nothing.
+    fn check_demo(src: &str, title: &str, min_connections: usize) {
+        let b = Board::parse(src);
+        assert_eq!(b.title.as_ref().map(|t| t.text.as_str()), Some(title));
+        for node in b.walk() {
+            for c in node.connections() {
+                for t in &c.targets {
+                    assert!(
+                        b.anchors.contains_key(t),
+                        "{} links to missing #{t}",
+                        node.key()
+                    );
+                }
+            }
+        }
+        assert!(
+            b.connections().len() >= min_connections,
+            "{}",
+            b.connections().len()
+        );
+        for key in b.appendix.entries.iter().map(|e| e.key.clone()) {
+            assert!(
+                b.keys().contains(&key),
+                "appendix key {key} matches no card"
+            );
+        }
+        for node in b.walk() {
+            if let NodeRef::Card(c) = node {
+                let title = c.heading.as_ref().map(|h| h.text.as_str());
+                assert!(
+                    crate::board::edit::set_card_text(&b, src, &c.id, title, &c.lines).is_none(),
+                    "{} would be rewritten",
+                    c.key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn apollo_demo_is_consistent() {
+        check_demo(
+            include_str!("../../../../examples/apollo.md"),
+            "Apollo: men on the Moon before 1970",
+            15,
+        );
+    }
+
+    #[test]
+    fn studio_demo_is_consistent() {
+        check_demo(
+            include_str!("../../../../examples/studio.md"),
+            "Studio notebook",
+            6,
+        );
+    }
+
+    #[test]
+    fn orgchart_demo_is_consistent() {
+        check_demo(
+            include_str!("../../../../examples/orgchart.md"),
+            "Kestrel Labs",
+            6,
+        );
+    }
+
+    #[test]
+    fn stockholm_demo_is_consistent() {
+        check_demo(
+            include_str!("../../../../examples/stockholm.md"),
+            "Stockholm: a history in six chapters",
+            0,
+        );
+    }
+}
