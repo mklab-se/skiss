@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The canvas. `skiss <file>` opens any Markdown file as a board (and creates the file if it does
+  not exist); `skiss` alone opens a start screen to name one. Headings with sub-headings become
+  areas, other headings become cards, loose paragraphs, lists, task lists, quotes, code, tables,
+  HTML and images become cards too.
+- Connections written as plain sentences: a list line such as
+  `- Manages [Erik Lund](#erik-lund)` is drawn as a labeled arrow. Drawing an arrow writes one.
+- Editing in place with rich text (bold, italic, code, strikethrough, links), the usual editor
+  shortcuts, Markdown habits while typing, task lists, and pasted images (saved in
+  `<file>.assets/`).
+- Autosave a moment after every change, live reload when the file changes on disk, and session
+  undo/redo (⌘Z, ⌘Y or ⌘⇧Z).
+- Minimal diffs: edits splice only the changed bytes. Hand-placed positions and card colors live in
+  one HTML comment appendix at the end of the file, one line per decorated card.
+- New cards (double-click, Tab), moving and reparenting by drag, grouping into areas (⌘G),
+  colors (toolbar or 1 to 7, with names you choose), deleting cards and connections.
+- Infinite zoom with levels of detail, a readable start view for big boards, collapsible long
+  cards, presenter text size (⌘⇧+ and ⌘⇧−), and springy animations that stop when nothing moves.
+- Two themes: Sketchbook (default) and Ember, switched with ⌘T or `--theme`.
+
+### Changed
+
+- MSRV 1.88 to 1.95, required by egui/eframe 0.37.
+
 ## [0.0.1] - 2026-10-20
 
 ### Added

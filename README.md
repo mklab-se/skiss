@@ -11,38 +11,85 @@
 <!-- "What's new" callout: keep it right after the badges and refresh it on every minor/major
      release (version and a one-line summary of the headline changes). Only link CHANGELOG.md. -->
 <p align="center">
-  <strong>skiss 0.0.1</strong> is here: the name is claimed and the release pipeline works. The
-  canvas itself is still on the drawing board.<br>
+  <strong>skiss</strong> now opens any Markdown file as a living board: cards, areas, arrows
+  written as plain sentences, and every change saved straight back to your file.<br>
   <a href="CHANGELOG.md"><strong>What's new</strong></a>
 </p>
 
 # skiss
 
 **skiss** (Swedish for "sketch") is an infinite canvas for your notes, stored as plain Markdown.
-Think Miro or a whiteboard app, but your board is a `.md` file you own, can diff, and can read in
-any editor:
+Think Miro or a whiteboard, but the board is a `.md` file on your own machine: you can read it in
+any editor, diff it in Git, and hand it to a client.
 
 ```sh
-skiss mynotes.md
+skiss notes.md          # open (or create) a board
+skiss                   # pick a name on the start screen
+skiss notes.md --theme ember
 ```
 
-It is a sibling of [MDeck](https://github.com/mklab-se/mdeck), which turns Markdown into
-presentations, and part of MKLab's family of Rust CLIs ([ailloy](https://github.com/mklab-se/ailloy),
-[cosq](https://github.com/mklab-se/cosq), [pidge](https://github.com/mklab-se/pidge),
-[rigg](https://github.com/mklab-se/rigg), and more).
+Try the demo board: `skiss examples/apollo.md`.
 
-> **Status: early.** Version 0.0.1 is a placeholder release that claims the name and proves the
-> build and release pipeline. It does not open a canvas yet. Follow along at
-> [skiss.net](https://skiss.net).
+## Your Markdown is the board
 
-## What works today
+skiss never shows Markdown syntax and never needs its own. The structure you already write becomes
+the board:
 
-```sh
-skiss --help          # show the CLI help
-skiss version         # banner + version
-skiss ai              # AI status (via Ailloy, MKLab's shared AI config)
-skiss completion zsh  # generate a shell completion script
+| In the file | On the board |
+| --- | --- |
+| `# Title` (the only H1, first) | the board title |
+| a heading with sub-headings | an **area** (a frame), nested as deep as you like |
+| a heading without sub-headings | a **card**: the heading is its title, the text below its body |
+| paragraphs, quotes, code, tables, images | one card each |
+| a bullet list | one card per item, nested items as cards inside |
+| a task list (`- [ ]`) | a checklist card with real checkboxes |
+
+**Connections are sentences.** A list line with a link to another card's heading is drawn as an
+arrow, labeled with the words in front of the link:
+
+```markdown
+### Anna Berg
+Program sponsor.
+- Manages [Erik Lund](#erik-lund) and [Sara Ek](#sara-ek)
+- Told me to contact [Johan Holm](#johan-holm), 2026-10-14
 ```
+
+Anyone reading the file sees ordinary notes. skiss sees who manages whom, who told you to contact
+whom, and when. Drawing an arrow in skiss writes exactly that kind of sentence.
+
+**Small diffs.** skiss rewrites only the bytes that changed: renaming a card changes one line,
+ticking a box changes one character, a new arrow adds one line. Hand-written files survive being
+opened and edited. Positions you set by dragging, and card colors, go into one HTML comment at the
+end of the file (invisible in every Markdown viewer), one line per decorated card:
+
+```markdown
+<!-- skiss
+Johan Holm: at 220, 120; blue
+Colors: red means Blocked
+-->
+```
+
+Pasted images are saved next to the file in `notes.assets/`.
+
+## Working on the canvas
+
+- **Autosave.** There is no save button. Changes are written a moment after you make them; if the
+  file changes on disk (Git, another editor, a sync tool), the board animates to the new state.
+- **Edit in place.** Double-click a card (or press Enter) and type. ⌘B, ⌘I, ⌘E, copy, paste,
+  select all, undo and redo work as in any editor, and so do Markdown habits: typing `**bold**`
+  turns bold. Enter in a task list adds a task; `[ ]` at the start of a line makes one.
+- **Add and arrange.** Double-click empty space for a new card, Tab for the next one, drag cards to
+  move them (into another area too), ⌘G to group selected cards into a new area, 1 to 7 for paper
+  colors.
+- **Connect.** Hover a card, drag one of the dots on its edge to another card, and say how they are
+  connected. Click a label to select the connection; Delete removes it.
+- **Zoom.** Pinch, ⌘-scroll or a mouse wheel zooms, without limits. Far out, cards turn into a map
+  of titles; close in, everything is readable. F fits everything. ⌘⇧+ makes text and lines bigger
+  for sharing your screen.
+- **Two looks.** Sketchbook (paper, handwriting) and Ember (MKLab's dark theme). ⌘T switches;
+  skiss remembers your choice.
+
+Press **?** in skiss for every shortcut.
 
 ## Install
 
@@ -61,12 +108,14 @@ cargo clippy --workspace --all-targets -- -D warnings    # lint (matches CI)
 cargo test --workspace                                   # test
 ```
 
-The CLI lives in `crates/skiss` and reusable logic in `crates/skiss-core`. See
-[CLAUDE.md](CLAUDE.md) for the architecture. Releases go through the
-[`/release`](.claude/skills/release/SKILL.md) skill: pushing a `vX.Y.Z` tag builds auditable
-binaries with CycloneDX SBOMs, publishes to crates.io and updates the
+`crates/skiss-core` holds the board model (Markdown in, board out, minimal-diff edits) with no UI
+dependencies; `crates/skiss` is the CLI and the egui canvas. See [CLAUDE.md](CLAUDE.md) for the
+architecture and [the design](docs/superpowers/specs/2026-10-20-skiss-design.md) for the reasoning.
+Releases go through the [`/release`](.claude/skills/release/SKILL.md) skill: pushing a `vX.Y.Z` tag
+builds auditable binaries with CycloneDX SBOMs, publishes to crates.io and updates the
 [Homebrew tap](https://github.com/mklab-se/homebrew-tap).
 
 ## License
 
-[MIT](LICENSE) © Kristofer Liljeblad
+[MIT](LICENSE) © Kristofer Liljeblad. The bundled fonts (Caveat, Hanken Grotesk, Spectral,
+JetBrains Mono) are under the SIL Open Font License; see `crates/skiss/fonts/`.

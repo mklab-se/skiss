@@ -6,8 +6,13 @@ Guidance for Claude Code (and other agents) working in this repository.
 
 `skiss` (Swedish for "sketch") is an infinite-canvas, Miro-style note-taking tool that stores
 everything in Markdown, in the spirit of MDeck (`../mdeck/`). Usage: `skiss mynotes.md`.
-Homepage: https://skiss.net. The domain design is still being worked out; this file describes the
-scaffold until then.
+Homepage: https://skiss.net. The design (rules, Markdown mapping, appendix format) is in
+`docs/superpowers/specs/2026-10-20-skiss-design.md`; read it before changing behavior.
+
+Non-negotiable rules from the design: any Markdown file must open; edits are minimal splices
+(never re-render the whole file); plain Markdown and English, with the HTML-comment appendix as
+the only skiss-specific syntax; autosave plus file watching; no Markdown syntax shown in the UI;
+fully Rust (no web view); American English spelling everywhere.
 
 ## Template lineage
 
@@ -38,15 +43,33 @@ A two-crate Cargo workspace:
 - `crates/skiss/`: the CLI binary.
   - `main.rs`: `#[tokio::main]`; sets up logging, dynamic-completion env, the `--no-color` override,
     and spawns the background update check, then calls `Cli::run`.
-  - `cli.rs`: clap-derive `Cli`, `Commands`, `AiCommands`, `Shell`; `Cli::run` dispatches. **The
-    no-subcommand (`None`) arm prints the banner and a "not built yet" note** until
-    `skiss <file.md>` opens a canvas. `--help`/`-h` work via clap.
+  - `cli.rs`: clap-derive `Cli`, `Commands`, `AiCommands`, `Shell`; `Cli::run` dispatches. With no
+    subcommand it opens the canvas (`FILE` and `--theme` are optional).
+  - `canvas/`: the eframe/egui window.
+    - `app.rs`: start screen vs board, theme switching and persistence, dev hooks.
+    - `view.rs`: the board view: painting, pointer/keyboard, editing, toolbar, prompts, overlays.
+    - `editor.rs`: rich-text card editing on characters with styles (never on Markdown).
+    - `content.rs`: text layout of a card (shared by measuring, drawing and caret hit-testing).
+    - `layout.rs`: world layout (shelf packing in document order, around hand-placed items).
+    - `motion.rs`: springs for every node, the camera; nothing repaints once settled.
+    - `document.rs`: the open file: autosave (250 ms), file watching (notify), undo/redo.
+    - `theme.rs`, `fonts.rs`, `draw.rs`, `images.rs`: looks, bundled OFL fonts, pencil lines, pictures.
+    - `script.rs`: development aid. `SKISS_SCRIPT=steps.txt skiss file.md` drives the window with real
+      input events (click, drag, type, key, shot); `SKISS_SCREENSHOT=out.png` saves the window and
+      quits. Use these to verify UI changes end to end and to look at the result.
   - `commands/`: one module per command (`ai`, `completion`). Add new commands here.
   - `banner.rs`: ASCII block-letter banner + version line.
   - `update.rs`: polls crates.io, caches the result for 24h in `paths::cache_dir()`, notifies on a
     newer version.
 - `crates/skiss-core/`: framework-agnostic library (no clap/tokio).
-  - `config.rs`: YAML `Config` in `paths::config_dir()`, a reusable starting point (unused so far).
+  - `board/`: the board model, with no UI dependencies.
+    - `blocks.rs`: pulldown-cmark block structure with exact byte ranges.
+    - `model.rs`: `Board::parse`: areas, cards, lines, connections, anchors (GitHub slugs).
+    - `inline.rs`: spans with styles, and back to Markdown.
+    - `appendix.rs`: the `<!-- skiss ... -->` decoration comment.
+    - `edit.rs`: every change as a minimal splice of the source (text, cards, connections, moves,
+      groups, tasks, appendix). Unchanged lines are copied verbatim; never write trailing spaces.
+  - `config.rs`: YAML `Config` in `paths::config_dir()` (the chosen theme).
   - `paths.rs`: where the tool keeps files. Linux and macOS share the XDG layout, same as Ailloy:
     `$XDG_CONFIG_HOME/<tool>` or `~/.config/<tool>`, `$XDG_CACHE_HOME/<tool>` or
     `~/.cache/<tool>`. Windows uses its native `%APPDATA%` / `%LOCALAPPDATA%`. Every MKLab tool
@@ -68,7 +91,7 @@ shared global config (`~/.config/ailloy/config.yaml`). To call a model from a co
 
 ## Conventions
 
-- Edition 2024, MSRV 1.88 (`[workspace.package]`; set by Ailloy, 1.88 since 2.x and still in 3.0).
+- Edition 2024, MSRV 1.95 (`[workspace.package]`; required by egui/eframe 0.37).
 - All deps are declared in the root `[workspace.dependencies]` and inherited with `.workspace = true`.
   Current majors: clap 4.6, tokio 1.53, colored 3, dirs 7, thiserror 2, ailloy 3.0, reqwest 0.13.
   YAML is `serde_norway` 0.9, the maintained drop-in fork of the deprecated `serde_yaml`
