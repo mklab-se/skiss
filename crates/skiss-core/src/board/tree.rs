@@ -1,11 +1,15 @@
 //! Hierarchies hidden in a board's connections: who reports to whom, what is part of what.
 //!
 //! Nothing is configured. A kind of connection (the same sentence, such as "Reports to") forms
-//! a hierarchy when every card has at most one connection of that kind going out (the target
-//! is the parent: "Reports to", "Part of") or, failing that, at most one coming in (the source
-//! is the parent: "Manages", "Leads"), there are no cycles, and the hierarchy is big enough to
-//! be worth showing as one: at least three connections, with three cards in a chain or under
-//! one parent. Lone pairs stay ordinary arrows.
+//! a hierarchy when there are no cycles, it is big enough to be worth showing as one (at least
+//! three connections, with three cards in a chain or under one parent), and one of these holds:
+//!
+//! - It is a chain: every card has at most one of them going out and one coming in ("Followed
+//!   by", "Then"). It reads in the direction of its arrows, so the source goes first.
+//! - Every card has at most one going out: the target is the parent ("Reports to", "Part of").
+//! - Every card has at most one coming in: the source is the parent ("Manages", "Leads").
+//!
+//! Lone pairs stay ordinary arrows.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -54,9 +58,11 @@ fn as_tree(edges: &[(String, String)]) -> Option<Vec<(String, String)>> {
         *out_deg.entry(f).or_default() += 1;
         *in_deg.entry(t).or_default() += 1;
     }
-    let pairs: Vec<(String, String)> = if out_deg.values().all(|&d| d <= 1) {
+    let one_out = out_deg.values().all(|&d| d <= 1);
+    let one_in = in_deg.values().all(|&d| d <= 1);
+    let pairs: Vec<(String, String)> = if one_out && !one_in {
         edges.to_vec()
-    } else if in_deg.values().all(|&d| d <= 1) {
+    } else if one_in {
         edges.iter().map(|(f, t)| (t.clone(), f.clone())).collect()
     } else {
         return None;
@@ -169,6 +175,19 @@ mod tests {
         assert_eq!(p.get("b").map(String::as_str), Some("a"));
         assert_eq!(p.get("c").map(String::as_str), Some("a"));
         assert_eq!(p.get("d").map(String::as_str), Some("b"));
+    }
+
+    #[test]
+    fn chains_read_along_their_arrows() {
+        let src = "# Flights\n\n## A\n- Followed by [B](#b)\n\n## B\n- Followed by [C](#c)\n\n## C\n- Followed by [D](#d)\n\n## D\n";
+        let p = hierarchy(&Board::parse(src));
+        assert_eq!(
+            p.get("b").map(String::as_str),
+            Some("a"),
+            "the first goes on top"
+        );
+        assert_eq!(p.get("d").map(String::as_str), Some("c"));
+        assert!(!p.contains_key("a"));
     }
 
     #[test]
