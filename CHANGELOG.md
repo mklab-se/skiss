@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-10-20
+
 ### Added
 
 - First placeholder release of skiss, an infinite canvas for notes stored as Markdown. It claims
@@ -15,4 +17,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completions, version banner, background update checker, and auditable release builds with
   CycloneDX SBOMs.
 
-[Unreleased]: https://github.com/mklab-se/skiss/commits/main
+[Unreleased]: https://github.com/mklab-se/skiss/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/mklab-se/skiss/releases/tag/v0.0.1
