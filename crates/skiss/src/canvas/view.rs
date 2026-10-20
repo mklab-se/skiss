@@ -3416,119 +3416,107 @@ impl BoardView {
             .pivot(Align2::CENTER_BOTTOM)
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
-                egui::Frame::new()
-                    .fill(theme.ui_bg)
-                    .corner_radius(9.0)
-                    .inner_margin(egui::Margin::symmetric(8, 5))
-                    .shadow(egui::Shadow {
-                        offset: [0, 3],
-                        blur: 12,
-                        spread: 0,
-                        color: Color32::from_black_alpha(60),
-                    })
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
-                            let tb = |ui: &mut Ui, text: egui::RichText, tip: &str| {
-                                hint(
-                                    pill(ui, text, true, theme, vec2(26.0, 26.0)),
-                                    keys(tip),
-                                    theme,
-                                )
-                                .clicked()
+                glass(ui, theme, 12.0, egui::Margin::symmetric(8, 6), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let tb = |ui: &mut Ui, text: egui::RichText, tip: &str| {
+                            hint(
+                                pill(ui, text, true, theme, vec2(26.0, 26.0)),
+                                keys(tip),
+                                theme,
+                            )
+                            .clicked()
+                        };
+                        if editing {
+                            if tb(
+                                ui,
+                                egui::RichText::new("B").strong().size(15.0),
+                                "Bold (⌘B)",
+                            ) {
+                                actions.push(ToolbarAction::Bold);
+                            }
+                            if tb(
+                                ui,
+                                egui::RichText::new("I").italics().size(15.0),
+                                "Italic (⌘I)",
+                            ) {
+                                actions.push(ToolbarAction::Italic);
+                            }
+                            if tb(
+                                ui,
+                                egui::RichText::new("S").strikethrough().size(15.0),
+                                "Strikethrough (⌘⇧X)",
+                            ) {
+                                actions.push(ToolbarAction::Strike);
+                            }
+                            if tb(ui, egui::RichText::new("Task").size(13.0), "Task (⌘L)") {
+                                actions.push(ToolbarAction::Task);
+                            }
+                            ui.add_space(2.0);
+                            divider(ui, theme);
+                        }
+                        for c in Color::ALL {
+                            let fill = theme.paper(c);
+                            let (r, resp) =
+                                ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                            let on = current_color == Some(c);
+                            ui.painter().circle(
+                                r.center(),
+                                7.5,
+                                fill,
+                                Stroke::new(
+                                    if on { 2.5 } else { 1.2 },
+                                    if on { theme.accent } else { theme.ink(c) },
+                                ),
+                            );
+                            let name = self.doc.board.appendix.color_name(c).map(str::to_string);
+                            let tip = match &name {
+                                Some(n) => format!(
+                                    "{} · {n}  (right-click to rename)",
+                                    capitalize(c.name())
+                                ),
+                                None => {
+                                    format!("{}  (right-click to name it)", capitalize(c.name()))
+                                }
                             };
-                            if editing {
-                                if tb(
-                                    ui,
-                                    egui::RichText::new("B").strong().size(15.0),
-                                    "Bold (⌘B)",
-                                ) {
-                                    actions.push(ToolbarAction::Bold);
-                                }
-                                if tb(
-                                    ui,
-                                    egui::RichText::new("I").italics().size(15.0),
-                                    "Italic (⌘I)",
-                                ) {
-                                    actions.push(ToolbarAction::Italic);
-                                }
-                                if tb(
-                                    ui,
-                                    egui::RichText::new("S").strikethrough().size(15.0),
-                                    "Strikethrough (⌘⇧X)",
-                                ) {
-                                    actions.push(ToolbarAction::Strike);
-                                }
-                                if tb(ui, egui::RichText::new("Task").size(13.0), "Task (⌘L)") {
-                                    actions.push(ToolbarAction::Task);
-                                }
-                                ui.add_space(2.0);
-                                ui.separator();
+                            let resp = hint(resp, tip, theme);
+                            if resp.clicked() {
+                                actions.push(ToolbarAction::Color(c));
                             }
-                            for c in Color::ALL {
-                                let fill = theme.paper(c);
-                                let (r, resp) =
-                                    ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-                                let on = current_color == Some(c);
-                                ui.painter().circle(
-                                    r.center(),
-                                    7.5,
-                                    fill,
-                                    Stroke::new(
-                                        if on { 2.5 } else { 1.2 },
-                                        if on { theme.accent } else { theme.ink(c) },
-                                    ),
-                                );
-                                let name =
-                                    self.doc.board.appendix.color_name(c).map(str::to_string);
-                                let tip = match &name {
-                                    Some(n) => format!(
-                                        "{} · {n}  (right-click to rename)",
-                                        capitalize(c.name())
-                                    ),
-                                    None => format!(
-                                        "{}  (right-click to name it)",
-                                        capitalize(c.name())
-                                    ),
-                                };
-                                let resp = hint(resp, tip, theme);
-                                if resp.clicked() {
-                                    actions.push(ToolbarAction::Color(c));
-                                }
-                                if resp.secondary_clicked() {
-                                    actions.push(ToolbarAction::NameColor(c, r.center()));
-                                }
+                            if resp.secondary_clicked() {
+                                actions.push(ToolbarAction::NameColor(c, r.center()));
                             }
-                            ui.separator();
-                            if !editing
-                                && tb(ui, egui::RichText::new("Edit").size(13.0), "Edit (Enter)")
-                            {
-                                actions.push(ToolbarAction::Edit);
-                            }
-                            if !editing
-                                && tb(
-                                    ui,
-                                    egui::RichText::new("Related").size(13.0),
-                                    "Everything about it (R)",
-                                )
-                            {
-                                actions.push(ToolbarAction::Related);
-                            }
-                            if !editing
-                                && single_card
-                                && tb(
-                                    ui,
-                                    egui::RichText::new("AI").size(13.0),
-                                    "Spelling, rewriting, translating, pictures",
-                                )
-                            {
-                                actions.push(ToolbarAction::Ai);
-                            }
-                            if tb(ui, egui::RichText::new("Delete").size(13.0), "Delete (⌫)") {
-                                actions.push(ToolbarAction::Delete);
-                            }
-                        });
+                        }
+                        divider(ui, theme);
+                        if !editing
+                            && tb(ui, egui::RichText::new("Edit").size(13.0), "Edit (Enter)")
+                        {
+                            actions.push(ToolbarAction::Edit);
+                        }
+                        if !editing
+                            && tb(
+                                ui,
+                                egui::RichText::new("Related").size(13.0),
+                                "Everything about it (R)",
+                            )
+                        {
+                            actions.push(ToolbarAction::Related);
+                        }
+                        if !editing
+                            && single_card
+                            && tb(
+                                ui,
+                                egui::RichText::new("AI").size(13.0),
+                                "Spelling, rewriting, translating, pictures",
+                            )
+                        {
+                            actions.push(ToolbarAction::Ai);
+                        }
+                        if tb(ui, egui::RichText::new("Delete").size(13.0), "Delete (⌫)") {
+                            actions.push(ToolbarAction::Delete);
+                        }
                     });
+                });
             });
         let now = ui.input(|i| i.time);
         let toolbar_bottom = pos2(pos.x, pos.y + 6.0);
@@ -4288,65 +4276,51 @@ impl BoardView {
             .pivot(Align2::CENTER_BOTTOM)
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
-                egui::Frame::new()
-                    .fill(theme.ui_bg.gamma_multiply(0.94))
-                    .corner_radius(12.0)
-                    .inner_margin(egui::Margin::symmetric(10, 6))
-                    .shadow(egui::Shadow {
-                        offset: [0, 3],
-                        blur: 14,
-                        spread: 0,
-                        color: Color32::from_black_alpha(55),
-                    })
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
-                            let mut b =
-                                |ui: &mut Ui,
-                                 label: &str,
-                                 tip: &str,
-                                 on: bool,
-                                 key: &'static str| {
-                                    let text = egui::RichText::new(label).size(14.0);
-                                    let r = pill(ui, text, on, theme, vec2(30.0, 28.0));
-                                    rects.push((key.to_string(), r.rect));
-                                    if hint(r, keys(tip), theme).clicked() {
-                                        act = Some(key);
-                                    }
-                                };
-                            b(
-                                ui,
-                                "+ Card",
-                                "New card (double-click empty space, or Tab)",
-                                true,
-                                "card",
-                            );
-                            b(
-                                ui,
-                                "+ Area",
-                                "New area (or select cards and press ⌘G)",
-                                true,
-                                "area",
-                            );
-                            b(
-                                ui,
-                                "Group",
-                                "Put the selected cards in a new area (⌘G)",
-                                can_group,
-                                "group",
-                            );
-                            ui.separator();
-                            b(
-                                ui,
-                                "Tidy up",
-                                "Lay everything out again (⌘⇧L)",
-                                true,
-                                "tidy",
-                            );
-                            ui.separator();
-                            b(ui, "?", "Shortcuts", true, "help");
-                        });
+                glass(ui, theme, 16.0, egui::Margin::symmetric(10, 8), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let mut b =
+                            |ui: &mut Ui, label: &str, tip: &str, on: bool, key: &'static str| {
+                                let text = egui::RichText::new(label).size(14.0);
+                                let r = pill(ui, text, on, theme, vec2(30.0, 28.0));
+                                rects.push((key.to_string(), r.rect));
+                                if hint(r, keys(tip), theme).clicked() {
+                                    act = Some(key);
+                                }
+                            };
+                        b(
+                            ui,
+                            "+ Card",
+                            "New card (double-click empty space, or Tab)",
+                            true,
+                            "card",
+                        );
+                        b(
+                            ui,
+                            "+ Area",
+                            "New area (or select cards and press ⌘G)",
+                            true,
+                            "area",
+                        );
+                        b(
+                            ui,
+                            "Group",
+                            "Put the selected cards in a new area (⌘G)",
+                            can_group,
+                            "group",
+                        );
+                        divider(ui, theme);
+                        b(
+                            ui,
+                            "Tidy up",
+                            "Lay everything out again (⌘⇧L)",
+                            true,
+                            "tidy",
+                        );
+                        divider(ui, theme);
+                        b(ui, "?", "Shortcuts", true, "help");
                     });
+                });
             });
         self.dock_buttons.retain(|(k, _)| k.starts_with("ai-"));
         self.dock_buttons.extend(rects);
@@ -5036,7 +5010,8 @@ fn hint(resp: egui::Response, text: impl Into<String>, theme: &Theme) -> egui::R
 /// A button that looks and feels like one: a soft pill that lights up under the pointer and
 /// presses in when clicked.
 fn pill(ui: &mut Ui, text: egui::RichText, on: bool, theme: &Theme, min: Vec2) -> egui::Response {
-    let base = theme.ui_text;
+    let g = Glass::of(theme);
+    let base = g.ink;
     let color = if on { base } else { base.gamma_multiply(0.35) };
     let galley = egui::WidgetText::from(text.color(color)).into_galley(
         ui,
@@ -5054,12 +5029,17 @@ fn pill(ui: &mut Ui, text: egui::RichText, on: bool, theme: &Theme, min: Vec2) -
     let r = if down { rect.shrink(1.5) } else { rect };
     let p = ui.painter();
     if on {
-        let fill = if down { 0.28 } else { 0.07 + 0.11 * hover };
-        p.rect_filled(r, 8.0, base.gamma_multiply(fill));
+        // Frosted spots on the glass: brighter under the pointer, darker when pressed.
+        let fill = if down {
+            g.press
+        } else {
+            lerp_color(g.spot, g.spot_hover, hover)
+        };
+        p.rect_filled(r, 9.0, fill);
         p.rect_stroke(
             r,
-            8.0,
-            Stroke::new(1.0, base.gamma_multiply(0.14 + 0.2 * hover)),
+            9.0,
+            Stroke::new(1.0, lerp_color(g.spot_edge, g.rim, hover * 0.6)),
             StrokeKind::Inside,
         );
         if resp.hovered() {
@@ -5088,4 +5068,136 @@ fn keycap(ui: &mut Ui, text: &str, ink: Color32, fill: Color32, edge: Color32) {
     p.rect_filled(rect, 5.0, fill);
     p.rect_stroke(rect, 5.0, Stroke::new(1.0, edge), StrokeKind::Inside);
     p.galley(rect.center() - galley.size() / 2.0, galley, ink);
+}
+
+/// The colors of the floating glass bars (the dock and the card toolbar).
+struct Glass {
+    body: Color32,
+    /// Light catching the top of the glass.
+    sheen: Color32,
+    rim: Color32,
+    edge: Color32,
+    shadow: Color32,
+    ink: Color32,
+    spot: Color32,
+    spot_hover: Color32,
+    spot_edge: Color32,
+    press: Color32,
+}
+
+impl Glass {
+    fn of(theme: &Theme) -> Glass {
+        if theme.dark {
+            Glass {
+                body: Color32::from_rgba_unmultiplied(34, 30, 27, 218),
+                sheen: Color32::from_white_alpha(14),
+                rim: Color32::from_white_alpha(70),
+                edge: Color32::from_white_alpha(26),
+                shadow: Color32::from_black_alpha(110),
+                ink: theme.ui_text,
+                spot: Color32::from_white_alpha(16),
+                spot_hover: Color32::from_white_alpha(36),
+                spot_edge: Color32::from_white_alpha(18),
+                press: Color32::from_black_alpha(70),
+            }
+        } else {
+            Glass {
+                body: Color32::from_rgba_unmultiplied(255, 252, 244, 205),
+                sheen: Color32::from_white_alpha(120),
+                rim: Color32::from_white_alpha(235),
+                edge: Color32::from_rgba_unmultiplied(70, 52, 34, 46),
+                shadow: Color32::from_rgba_unmultiplied(60, 40, 20, 50),
+                ink: theme.text,
+                spot: Color32::from_white_alpha(90),
+                spot_hover: Color32::from_white_alpha(200),
+                spot_edge: Color32::from_rgba_unmultiplied(70, 52, 34, 28),
+                press: Color32::from_rgba_unmultiplied(70, 52, 34, 40),
+            }
+        }
+    }
+}
+
+/// Draws `add` on a pane of glass: see-through, a light top edge and a soft shadow.
+fn glass<R>(
+    ui: &mut Ui,
+    theme: &Theme,
+    radius: f32,
+    margin: egui::Margin,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let g = Glass::of(theme);
+    let behind = ui.painter().add(Shape::Noop);
+    let inner = egui::Frame::new().inner_margin(margin).show(ui, add);
+    let r = inner.response.rect;
+    let top = Rect::from_min_max(r.min, pos2(r.max.x, r.center().y));
+    let corners_top = egui::CornerRadius {
+        nw: radius as u8,
+        ne: radius as u8,
+        sw: 0,
+        se: 0,
+    };
+    let shapes = vec![
+        Shape::from(
+            egui::Shadow {
+                offset: [0, 10],
+                blur: 30,
+                spread: 0,
+                color: g.shadow,
+            }
+            .as_shape(r, radius),
+        ),
+        Shape::from(egui::epaint::RectShape::filled(r, radius, g.body)),
+        // A sheen fading down from the top: two soft steps read as one gradient.
+        Shape::from(egui::epaint::RectShape::filled(
+            top.shrink(1.0),
+            corners_top,
+            g.sheen.gamma_multiply(0.55),
+        )),
+        Shape::from(egui::epaint::RectShape::filled(
+            Rect::from_min_max(top.min, pos2(top.max.x, top.min.y + top.height() * 0.45))
+                .shrink(1.0),
+            corners_top,
+            g.sheen.gamma_multiply(0.6),
+        )),
+        Shape::from(egui::epaint::RectShape::stroke(
+            r,
+            radius,
+            Stroke::new(1.0, g.edge),
+            StrokeKind::Inside,
+        )),
+        // The bright rim where light hits the top edge.
+        Shape::line_segment(
+            [
+                pos2(r.min.x + radius * 0.8, r.min.y + 1.0),
+                pos2(r.max.x - radius * 0.8, r.min.y + 1.0),
+            ],
+            Stroke::new(1.0, g.rim),
+        ),
+    ];
+    ui.painter().set(behind, Shape::Vec(shapes));
+    inner.inner
+}
+
+/// A thin upright line between groups of buttons on the glass.
+fn divider(ui: &mut Ui, theme: &Theme) {
+    let g = Glass::of(theme);
+    let (r, _) = ui.allocate_exact_size(vec2(9.0, 24.0), Sense::hover());
+    ui.painter().line_segment(
+        [
+            r.center_top() + vec2(0.0, 3.0),
+            r.center_bottom() - vec2(0.0, 3.0),
+        ],
+        Stroke::new(1.0, g.edge.gamma_multiply(1.6)),
+    );
+}
+
+fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    Color32::from_rgba_premultiplied(
+        mix(a.r(), b.r()),
+        mix(a.g(), b.g()),
+        mix(a.b(), b.b()),
+        mix(a.a(), b.a()),
+    )
 }
