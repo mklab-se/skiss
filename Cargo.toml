@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rusty-tmpl",
+    "crates/rusty-tmpl-core",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Kristofer Liljeblad <kristofer@mklab.se>"]
+license = "MIT"
+repository = "https://github.com/mklab-se/rusty-tmpl"
+rust-version = "1.88"
+
+[workspace.dependencies]
+# Internal crates
+rusty-tmpl-core = { version = "0.1.0", path = "crates/rusty-tmpl-core" }
+
+# CLI
+clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }
+clap_complete = { version = "4.6", features = ["unstable-dynamic"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+# serde_norway: maintained drop-in fork of the deprecated serde_yaml, chosen fleet-wide 2026-10-07.
+serde_norway = "0.9"
+
+# Async
+tokio = { version = "1.53", features = ["full"] }
+
+# HTTP
+# rustls-tls-native-roots was renamed rustls in reqwest 0.13; it now validates against the
+# live OS trust store (rustls-platform-verifier) with aws-lc-rs as the crypto provider, which
+# needs NASM + CMake to build on Windows (see the release workflow's "Install NASM" step and
+# INSTALL.md). Ailloy is on the same 0.13 line, so the TLS stack stays shared.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Terminal
+colored = "3.1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Versioning & time
+semver = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+
+# Directories
+dirs = "7.0"
+
+# AI
+ailloy = { version = "3.0", default-features = false, features = ["config-tui"] }
