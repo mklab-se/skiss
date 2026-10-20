@@ -102,6 +102,10 @@ pub struct BoardView {
     selected_conn: Option<(String, String)>,
     /// Bring the card being edited into view once its layout is known.
     reveal_pending: bool,
+    /// Place the caret here once the card being edited has been laid out.
+    pending_caret: Option<Pos2>,
+    /// Until when scrolling belongs to a mouse-wheel zoom.
+    wheel_until: f64,
 }
 
 /// A connection label to draw on top of the cards.
@@ -139,6 +143,8 @@ impl BoardView {
             last_screen: Rect::NOTHING,
             selected_conn: None,
             reveal_pending: false,
+            pending_caret: None,
+            wheel_until: 0.0,
         }
     }
 
@@ -244,6 +250,13 @@ impl BoardView {
         // Paint, collecting clickable spots.
         let painter = ui.painter_at(screen);
         self.paint(&ctx, &painter, screen, theme, now);
+
+        if let Some(at) = self.pending_caret.take()
+            && let Some(pos) = self.editor_pos_at(at)
+            && let Some(ed) = &mut self.editor
+        {
+            ed.set_cursor(pos, false);
+        }
 
         // Pointer input on things.
         self.pointer(ui, screen, &response, theme);
@@ -1427,6 +1440,44 @@ impl BoardView {
         if zoom != 1.0 {
             self.camera.zoom_at(screen, at, zoom);
         }
+        // A physical mouse wheel zooms (like Miro); trackpad scrolling pans.
+        let now = ui.input(|i| i.time);
+        let wheel: f32 = ui.input(|i| {
+            i.raw
+                .events
+                .iter()
+                .filter_map(|e| match e {
+                    Event::MouseWheel {
+                        unit,
+                        delta,
+                        source,
+                        modifiers,
+                        ..
+                    } if !modifiers.shift
+                        && (*source == egui::MouseWheelSource::Wheel
+                            || (*source == egui::MouseWheelSource::Unknown
+                                && *unit == egui::MouseWheelUnit::Line)) =>
+                    {
+                        let lines = match unit {
+                            egui::MouseWheelUnit::Point => delta.y / 40.0,
+                            egui::MouseWheelUnit::Line => delta.y,
+                            egui::MouseWheelUnit::Page => delta.y * 10.0,
+                        };
+                        Some(lines)
+                    }
+                    _ => None,
+                })
+                .sum()
+        });
+        if wheel != 0.0 {
+            self.wheel_until = now + 0.35;
+            self.camera.glide_zoom(screen, at, (wheel * 0.18).exp());
+            return;
+        }
+        if now < self.wheel_until && !(mods.command || mods.ctrl) {
+            // egui keeps easing the wheel's scroll for a moment: do not pan with it.
+            return;
+        }
         if scroll != Vec2::ZERO {
             if mods.command || mods.ctrl {
                 let f = (scroll.y * 0.0035).exp();
@@ -1931,17 +1982,13 @@ impl BoardView {
             return;
         };
         let mut ed = Editor::new(card);
+        self.edit_text = None;
         if let Some(at) = at {
+            // The card's text layout is known after the next paint: place the caret then.
+            let end = ed.end();
+            ed.set_cursor(end, false);
             self.editor = Some(ed);
-            // Layout of the editing card is only known after paint; place caret next frame.
-            if let Some(pos) = self.editor_pos_at(at)
-                && let Some(ed) = &mut self.editor
-            {
-                ed.set_cursor(pos, false);
-            } else if let Some(ed) = &mut self.editor {
-                let end = ed.end();
-                ed.set_cursor(end, false);
-            }
+            self.pending_caret = Some(at);
         } else {
             if !fresh {
                 let end = ed.end();

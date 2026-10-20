@@ -946,6 +946,23 @@ Tech lead.
     }
 
     #[test]
+    fn typing_into_a_new_list_item() {
+        let mut src = "- idea\n- other\n".to_string();
+        let b = Board::parse(&src);
+        let e = insert_card(&b, &src, "", Some("/2"), "").unwrap();
+        src = e.source;
+        for word in ["R", "Ro", "Roadmap"] {
+            let b = Board::parse(&src);
+            let card = node_at(&b, e.at).unwrap().id().to_string();
+            let line = plain_line(LineKind::Paragraph, 0, word);
+            if let Some(out) = set_card_text(&b, &src, &card, None, &[line]) {
+                src = out.source;
+            }
+        }
+        assert_eq!(src, "- idea\n- other\n- Roadmap\n");
+    }
+
+    #[test]
     fn connection_is_one_new_line() {
         let b = Board::parse(SRC);
         let out = add_connection(&b, SRC, "erik-lund", "anna-berg", "reports to").unwrap();

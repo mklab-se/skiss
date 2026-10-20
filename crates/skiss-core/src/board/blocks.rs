@@ -193,7 +193,13 @@ pub fn item_text_range(src: &str, item: &Block) -> Range<usize> {
         .iter()
         .find(|c| matches!(c.kind, BlockKind::List(_)))
         .map_or(item.range.end, |l| line_start(src, l.range.start));
-    trim(src, start.min(end)..end)
+    let r = trim(src, start.min(end)..end);
+    if r.is_empty() {
+        // An empty item ("- "): its text goes right after the marker, on the marker's line.
+        let at = start.min(line_end(src, item.range.start));
+        return at..at;
+    }
+    r
 }
 
 /// Heading text without the `#` marks (or the setext underline).
@@ -243,6 +249,16 @@ mod tests {
         assert_eq!(&src[item_text_range(src, &items[1])], "Done");
         let ordered = &blocks[1].children[0];
         assert_eq!(&src[item_text_range(src, ordered)], "First");
+    }
+
+    #[test]
+    fn empty_item_text_sits_on_its_own_line() {
+        let src = "- a\n- \n- b\n";
+        let blocks = parse_blocks(src);
+        let empty = &blocks[0].children[1];
+        let r = item_text_range(src, empty);
+        assert!(r.is_empty());
+        assert_eq!(&src[..r.start], "- a\n- ");
     }
 
     #[test]
