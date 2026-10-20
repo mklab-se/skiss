@@ -11,9 +11,9 @@
 <!-- "What's new" callout: keep it right after the badges and refresh it on every minor/major
      release (version and a one-line summary of the headline changes). Only link CHANGELOG.md. -->
 <p align="center">
-  <strong>skiss 0.1</strong> is here: any Markdown file opens as a living board, with arrows
-  written as sentences, org charts and timelines that lay themselves out, and every change saved
-  straight back to your file.<br>
+  <strong>skiss 0.2</strong> is here: press <code>.</code> and just write. Skiss puts the note
+  where it belongs on your board, in the format of its neighbors, and AI can write or draw it
+  for you.<br>
   <a href="CHANGELOG.md"><strong>What's new</strong></a>
 </p>
 
@@ -41,6 +41,8 @@ is saved to the file as you go.
   nothing you can't read without it.
 - **See the shape of your thinking.** Headings become cards and areas, lists become checklists,
   links become arrows. A file you have been growing for months suddenly has a map.
+- **Just write.** Press `.` anywhere and type. Press Enter, and Skiss files the note in the right
+  place, in the same format as the notes around it (with AI through your own models).
 - **Write like you talk.** An arrow is just a sentence: `- Reports to [Amara Okafor](#amara-okafor)`.
   Anyone reading the file understands it; skiss draws it.
 - **Git loves it.** skiss changes only the bytes you changed. Tick a box and the diff is one
@@ -166,6 +168,11 @@ Pasted and generated pictures are saved next to the file, in `notes.assets/`.
 
 - **Autosave and live reload.** No save button. If the file changes on disk (Git, another editor, a
   sync tool), the board animates to the new state.
+- **Jot.** Press `.` for a large editor over the board: formatting, links, lists, tables and
+  pictures all work. Enter puts the note in its place: an AI judge (TypeSafe Jev, or your chat
+  model) picks the area, adds a to-do to the right checklist, and asks you when it is unsure.
+  Start with `/` to have AI write it from the whole board (`/summarize this board in two
+  paragraphs`), or `/picture` to draw one. Without AI, notes go to an Inbox area.
 - **Edit in place.** Bold, italic, code, links, tasks, line breaks, undo and redo, and your Markdown
   habits: typing `**bold**` turns bold.
 - **Arrange.** Add cards and areas, drag cards between areas, group a selection (⌘G), resize, pick

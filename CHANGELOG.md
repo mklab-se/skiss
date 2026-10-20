@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-20
+
 ### Added
 
 - Jot: press `.` anywhere and write. A large editor opens over the board with everything a card
@@ -19,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to an Inbox area. The dock has a + Note button.
 - An app icon in the style of the README art: a robot hand writing with a quill, in pencil on
   parchment. It shows in the macOS Dock, the Windows taskbar and Linux window lists.
+
+### Changed
+
+- Hovering a link shows where it goes (the card it points at, or the web address) in readable
+  colors, instead of a generic hint.
 
 ## [0.1.0] - 2026-10-20
 
@@ -89,6 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completions, version banner, background update checker, and auditable release builds with
   CycloneDX SBOMs.
 
-[Unreleased]: https://github.com/mklab-se/skiss/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mklab-se/skiss/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mklab-se/skiss/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mklab-se/skiss/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/mklab-se/skiss/releases/tag/v0.0.1
