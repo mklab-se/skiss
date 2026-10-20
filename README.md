@@ -23,10 +23,13 @@ Think Miro or a whiteboard, but the board is a `.md` file on your own machine: y
 any editor, diff it in Git, and hand it to a client.
 
 ```sh
-skiss notes.md          # open (or create) a board
-skiss                   # pick a name on the start screen
+skiss notes.md          # open (or create) a board; the prompt comes right back
+skiss                   # start screen: name a file, pick a folder, or open one
 skiss notes.md --theme ember
+skiss notes.md --wait   # stay attached until the window closes
 ```
+
+Esc twice closes the window (everything is already saved).
 
 Try the demo board: `skiss examples/apollo.md`.
 
@@ -78,11 +81,13 @@ Pasted images are saved next to the file in `notes.assets/`.
 - **Edit in place.** Double-click a card (or press Enter) and type. ⌘B, ⌘I, ⌘E, copy, paste,
   select all, undo and redo work as in any editor, and so do Markdown habits: typing `**bold**`
   turns bold. Enter in a task list adds a task; `[ ]` at the start of a line makes one.
-- **Add and arrange.** Double-click empty space for a new card, Tab for the next one, drag cards to
-  move them (into another area too), ⌘G to group selected cards into a new area, 1 to 7 for paper
-  colors.
-- **Connect.** Hover a card, drag one of the dots on its edge to another card, and say how they are
-  connected. Click a label to select the connection; Delete removes it.
+- **Add and arrange.** The dock at the bottom has **+ Card**, **+ Area**, **Group** and **Tidy
+  up**. Double-click empty space for a new card, Tab for the next one, drag cards to move them
+  (into another area too; nothing else moves), ⌘G to group selected cards into a new area, 1 to 7
+  for paper colors. Tidy up (⌘⇧L) lays the board out afresh.
+- **Connect.** Drag from a card's border (or one of its dots) to another card, and say how they are
+  connected. Click a line or its label to select it, double-click to rename it, Delete removes it.
+- **Rename.** Double-click a card to edit it, an area's title or the board title to rename them.
 - **Zoom.** Pinch, ⌘-scroll or a mouse wheel zooms, without limits. Far out, cards turn into a map
   of titles; close in, everything is readable. F fits everything. ⌘⇧+ makes text and lines bigger
   for sharing your screen.

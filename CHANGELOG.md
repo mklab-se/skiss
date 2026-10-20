@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Infinite zoom with levels of detail, a readable start view for big boards, collapsible long
   cards, presenter text size (⌘⇧+ and ⌘⇧−), and springy animations that stop when nothing moves.
 - Two themes: Sketchbook (default) and Ember, switched with ⌘T or `--theme`.
+- A dock with + Card, + Area, Group, Tidy up (⌘⇧L), theme and help. Moving a card keeps
+  everything else where it is; Tidy up lays the board out afresh.
+- Connections can be selected by clicking the line, renamed by double-clicking it or its label,
+  and drawn by dragging from anywhere on a card's border. Double-click the board title to rename it.
+- The prompt comes back right away (the window runs on its own; `--wait` stays attached). Esc
+  twice closes the window. The start screen picks a folder or opens an existing file.
 
 ### Changed
 
