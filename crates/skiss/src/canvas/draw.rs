@@ -171,8 +171,13 @@ pub fn port(r: Rect, side: u8, frac: f32) -> (Pos2, Vec2) {
 
 /// A curve between two ports. Returns the points, the label anchor and the end direction.
 pub fn curve(p0: Pos2, n0: Vec2, p3: Pos2, n3: Vec2) -> (Vec<Pos2>, Pos2, Vec2) {
+    curve_with(p0, n0, p3, n3, 1.0)
+}
+
+/// Like [`curve`], with the bend scaled by `bend` (bigger swings wider around obstacles).
+pub fn curve_with(p0: Pos2, n0: Vec2, p3: Pos2, n3: Vec2, bend: f32) -> (Vec<Pos2>, Pos2, Vec2) {
     let dist = (p3 - p0).length();
-    let k = (dist * 0.4).clamp(20.0, 220.0);
+    let k = (dist * 0.4).clamp(20.0, 220.0) * bend;
     let bez = CubicBezierShape::from_points_stroke(
         [p0, p0 + n0 * k, p3 + n3 * k, p3],
         false,
@@ -242,4 +247,17 @@ pub fn rotate(q: Pos2, center: Pos2, angle: f32) -> Pos2 {
     let (s, c) = angle.sin_cos();
     let d = q - center;
     center + vec2(d.x * c - d.y * s, d.x * s + d.y * c)
+}
+
+/// How much a curve runs through rectangles (number of sample points inside any of them).
+pub fn crossings(pts: &[Pos2], obstacles: &[Rect]) -> usize {
+    pts.iter()
+        .step_by(2)
+        .filter(|p| obstacles.iter().any(|r| r.contains(**p)))
+        .count()
+}
+
+/// The length of a polyline.
+pub fn length(pts: &[Pos2]) -> f32 {
+    pts.windows(2).map(|w| (w[1] - w[0]).length()).sum()
 }

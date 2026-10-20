@@ -805,13 +805,25 @@ impl BoardView {
             fracs: (f32, f32),
         }
         let mut cs: Vec<C> = Vec::new();
+        // Cards are obstacles; arrows look for the way around them that crosses the fewest.
+        let obstacles: Vec<(String, Rect)> = self
+            .layout
+            .order
+            .iter()
+            .filter(|id| self.layout.get(id).is_some_and(|n| n.kind == Kind::Card))
+            .filter_map(|id| {
+                self.motion
+                    .rect(id)
+                    .map(|r| (id.clone(), cam.rect_to_screen(screen, r).shrink(2.0)))
+            })
+            .collect();
         for (from, to, label, note) in conns {
             let (Some(a), Some(b)) = (self.motion.rect(&from), self.motion.rect(&to)) else {
                 continue;
             };
             let a = cam.rect_to_screen(screen, a);
             let b = cam.rect_to_screen(screen, b);
-            let sides = (draw::side_of(a, b.center()), draw::side_of(b, a.center()));
+            let sides = best_sides(a, b, &obstacles, &from, &to);
             cs.push(C {
                 from,
                 to,
@@ -899,7 +911,30 @@ impl BoardView {
             let stroke = Stroke::new(width, color);
             let (p0, n0) = draw::port(a, sides.0, fracs.0);
             let (p3, n3) = draw::port(b, sides.1, fracs.1);
-            let (pts, mid, dir) = draw::curve(p0, n0, p3, n3);
+            let (pts, mid, dir) = {
+                let others: Vec<Rect> = obstacles
+                    .iter()
+                    .filter(|(id, _)| {
+                        *id != from
+                            && *id != to
+                            && !self.is_inside(&from, id)
+                            && !self.is_inside(&to, id)
+                    })
+                    .map(|(_, r)| *r)
+                    .collect();
+                let plain = draw::curve(p0, n0, p3, n3);
+                if draw::crossings(&plain.0, &others) == 0 {
+                    plain
+                } else {
+                    // Swing wider when the plain bend still cuts through a card.
+                    [1.6, 2.3]
+                        .into_iter()
+                        .map(|k| draw::curve_with(p0, n0, p3, n3, k))
+                        .chain(std::iter::once(plain))
+                        .min_by_key(|c| draw::crossings(&c.0, &others))
+                        .expect("candidates")
+                }
+            };
             self.conn_paths
                 .push((from.clone(), to.clone(), pts.clone(), mid));
             draw::pencil_line(p, &pts, stroke, theme, &format!("{from}>{to}"), zoom);
@@ -4711,4 +4746,39 @@ impl PromptColors {
             }
         }
     }
+}
+
+/// Picks which sides of two cards an arrow leaves and enters: the pair whose curve crosses the
+/// fewest other cards, then the shortest.
+fn best_sides(a: Rect, b: Rect, obstacles: &[(String, Rect)], from: &str, to: &str) -> (u8, u8) {
+    let natural = (draw::side_of(a, b.center()), draw::side_of(b, a.center()));
+    let others: Vec<Rect> = obstacles
+        .iter()
+        .filter(|(id, _)| id != from && id != to)
+        .map(|(_, r)| *r)
+        .filter(|r| r.intersects(a.union(b).expand(220.0)))
+        .collect();
+    let score = |sa: u8, sb: u8| -> f32 {
+        let (p0, n0) = draw::port(a, sa, 0.5);
+        let (p3, n3) = draw::port(b, sb, 0.5);
+        let (pts, _, _) = draw::curve(p0, n0, p3, n3);
+        // Running back through its own cards counts as crossing too.
+        let own = [a.shrink(6.0), b.shrink(6.0)];
+        let hits = draw::crossings(&pts, &others) + draw::crossings(&pts, &own);
+        hits as f32 * 10_000.0 + draw::length(&pts)
+    };
+    let natural_score = score(natural.0, natural.1);
+    if natural_score < 10_000.0 {
+        return natural;
+    }
+    let mut best = (natural, natural_score);
+    for sa in 0..4u8 {
+        for sb in 0..4u8 {
+            let sc = score(sa, sb);
+            if sc < best.1 {
+                best = ((sa, sb), sc);
+            }
+        }
+    }
+    best.0
 }
