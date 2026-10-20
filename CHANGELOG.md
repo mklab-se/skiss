@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AI help through Ailloy: fix spelling, make clearer, shorten, translate, picture from a card,
   redraw a picture.
 - Arrows route around cards instead of under them.
+- Hard line breaks (for poems and addresses): ⇧Enter inserts one, saved as a trailing `\`.
+- A board opens zoomed out to show all of it at once; zoom in from there.
 - Resizing cards and areas from a corner grip; pasting copied cards between boards keeps them
   cards.
 

@@ -457,6 +457,29 @@ impl Editor {
         }
     }
 
+    /// Shift+Enter: a line break inside the paragraph (poems), not a new paragraph.
+    pub fn line_break(&mut self) -> Action {
+        self.delete_selection();
+        let li = self.cursor.line;
+        if self.lines[li].title || self.lines[li].is_atom() {
+            return self.newline();
+        }
+        let (style, link) = self.style_here();
+        self.lines[li].chars.insert(
+            self.cursor.col,
+            EChar {
+                c: '\n',
+                style,
+                link,
+            },
+        );
+        self.lines[li].orig = 0..0;
+        self.cursor.col += 1;
+        self.anchor = self.cursor;
+        self.dirty = true;
+        Action::Changed
+    }
+
     pub fn newline(&mut self) -> Action {
         self.delete_selection();
         if self.kind == CardKind::Item {

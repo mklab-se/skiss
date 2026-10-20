@@ -298,15 +298,8 @@ impl BoardView {
         if !self.camera_ready {
             let b = self.layout.bounds;
             self.camera.jump_to(screen, b, 80.0, 1.15);
-            // Too big to read when it all fits? Start readable, at the top left.
-            let readable = 0.62;
-            let target = if self.camera.zoom < readable {
-                let margin = Vec2::splat(70.0);
-                let view = (screen.size() - margin * 2.0) / readable;
-                Rect::from_min_size(b.min, view)
-            } else {
-                b
-            };
+            // Start with the whole board in view; zoom in from there.
+            let target = b;
             self.camera.jump_to(screen, target, 70.0, 1.15);
             let (z, c) = (self.camera.zoom, self.camera.center);
             // A gentle glide in as the cards pop up.
@@ -628,6 +621,7 @@ impl BoardView {
         }
 
         // Area labels when zoomed far out: the map view.
+        let mut drawn_labels: Vec<Rect> = Vec::new();
         if zoom < 0.45 {
             for id in &areas {
                 let Some(r) = self.motion.rect(id) else {
@@ -650,13 +644,14 @@ impl BoardView {
                     .max(9.0);
                 let font = FontId::new(size, theme.area_font.clone());
                 let g = p.layout_no_wrap(h.text.clone(), font, theme.text.gamma_multiply(fade));
-                // Outer areas: on the frame's top edge, like a folder tab. Nested areas: just
-                // inside their frame, so they never collide with their parent's label.
-                let pos = if depth == 0 {
-                    pos2(sr.min.x + 8.0, sr.min.y - g.size().y * 0.55)
-                } else {
-                    pos2(sr.min.x + 6.0, sr.min.y + 4.0)
-                };
+                // On the frame's top edge, like a folder tab; a nested name that would collide
+                // with one already drawn is left out at this zoom.
+                let pos = pos2(sr.min.x + 8.0, sr.min.y - g.size().y * 0.55);
+                let label_rect = Rect::from_min_size(pos, g.size()).expand2(vec2(10.0, 5.0));
+                if drawn_labels.iter().any(|r: &Rect| r.intersects(label_rect)) {
+                    continue;
+                }
+                drawn_labels.push(label_rect);
                 let bg = Rect::from_min_size(pos, g.size()).expand2(vec2(10.0, 5.0));
                 p.rect_filled(bg, 8.0, theme.bg.gamma_multiply(0.85 * fade));
                 p.galley(pos, g, theme.text);
@@ -990,12 +985,22 @@ impl BoardView {
                     plain
                 } else {
                     // Swing wider when the plain bend still cuts through a card.
-                    [1.6, 2.3]
+                    // Only if it clearly helps, and without wandering far.
+                    let base =
+                        draw::crossings(&plain.0, &others) as f32 * 45.0 + draw::length(&plain.0);
+                    [1.5, 2.0]
                         .into_iter()
                         .map(|k| draw::curve_with(p0, n0, p3, n3, k))
-                        .chain(std::iter::once(plain))
-                        .min_by_key(|c| draw::crossings(&c.0, &others))
-                        .expect("candidates")
+                        .map(|c| {
+                            (
+                                draw::crossings(&c.0, &others) as f32 * 45.0 + draw::length(&c.0),
+                                c,
+                            )
+                        })
+                        .filter(|(sc, _)| *sc < base * 0.85)
+                        .min_by(|a, b| a.0.total_cmp(&b.0))
+                        .map(|(_, c)| c)
+                        .unwrap_or(plain)
                 }
             };
             self.conn_paths
@@ -2815,7 +2820,7 @@ impl BoardView {
                         self.finish_editing();
                         return true;
                     }
-                    Key::Enter if m.shift => action = ed.insert_text(" "),
+                    Key::Enter if m.shift => action = ed.line_break(),
                     Key::Enter => action = ed.newline(),
                     Key::Backspace => action = ed.backspace(word || line_jump),
                     Key::Delete => action = ed.delete_forward(word),
@@ -4770,6 +4775,7 @@ impl BoardView {
             ),
             ("⌘⇧L", "tidy up the layout"),
             ("⌘B  ⌘I  ⌘E", "bold, italic, code"),
+            ("⇧Enter", "line break inside a paragraph"),
             ("⌘L or [ ]", "turn a line into a task"),
             ("⌘Z  ⌘Y", "undo, redo"),
             ("Scroll / pinch", "pan and zoom"),
@@ -4938,12 +4944,10 @@ fn best_sides(a: Rect, b: Rect, obstacles: &[(String, Rect)], from: &str, to: &s
         // Running back through its own cards counts as crossing too.
         let own = [a.shrink(6.0), b.shrink(6.0)];
         let hits = draw::crossings(&pts, &others) + draw::crossings(&pts, &own);
-        hits as f32 * 10_000.0 + draw::length(&pts)
+        // A short line that slips under a card beats a long loop around the board.
+        hits as f32 * 45.0 + draw::length(&pts)
     };
     let natural_score = score(natural.0, natural.1);
-    if natural_score < 10_000.0 {
-        return natural;
-    }
     let mut best = (natural, natural_score);
     for sa in 0..4u8 {
         for sb in 0..4u8 {

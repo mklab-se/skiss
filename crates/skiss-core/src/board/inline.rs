@@ -80,9 +80,14 @@ pub fn parse_inline(md: &str) -> Vec<Span> {
                 style.code = true;
                 push(&mut spans, &t, style, links.last().cloned());
             }
-            Event::SoftBreak | Event::HardBreak => {
+            Event::SoftBreak => {
                 style.code = false;
                 push(&mut spans, " ", style, links.last().cloned());
+            }
+            // A hard line break ("\\" or two spaces at the end of a line) keeps its line: poems.
+            Event::HardBreak => {
+                style.code = false;
+                push(&mut spans, "\n", style, links.last().cloned());
             }
             _ => {}
         }
@@ -164,13 +169,15 @@ pub fn to_markdown(spans: &[Span]) -> String {
     };
 
     for span in &spans {
-        let core = span.text.trim();
+        // Line breaks are content, not padding: only spaces and tabs move outside the marks.
+        let pad: &[char] = &[' ', '\t'];
+        let core = span.text.trim_matches(pad);
         if core.is_empty() {
             pending_ws.push_str(&span.text);
             continue;
         }
-        let lead = &span.text[..span.text.len() - span.text.trim_start().len()];
-        let trail = &span.text[span.text.trim_end().len()..];
+        let lead = &span.text[..span.text.len() - span.text.trim_start_matches(pad).len()];
+        let trail = &span.text[span.text.trim_end_matches(pad).len()..];
 
         if span.link != link {
             close_all(&mut out, &mut open);
@@ -219,6 +226,10 @@ pub fn to_markdown(spans: &[Span]) -> String {
         out.push(')');
     }
     out.push_str(&pending_ws);
+    // A line break at the very end means nothing in Markdown; do not write one.
+    while let Some(rest) = out.strip_suffix("\\\n") {
+        out = rest.to_string();
+    }
     out
 }
 
@@ -249,6 +260,8 @@ fn escape(text: &str) -> String {
                 out.push('\\');
                 out.push(c);
             }
+            // A line break inside a paragraph is written as a backslash at the end of the line.
+            '\n' => out.push_str("\\\n"),
             _ => out.push(c),
         }
     }
@@ -327,6 +340,18 @@ mod tests {
                 s(" c", false, false)
             ]
         );
+    }
+
+    #[test]
+    fn line_breaks_are_kept() {
+        let spans = parse_inline("The sea folds back\\\nits blue sheet  \nand *leaves*");
+        assert_eq!(
+            plain_text(&spans),
+            "The sea folds back\nits blue sheet\nand leaves"
+        );
+        let md = to_markdown(&spans);
+        assert_eq!(md, "The sea folds back\\\nits blue sheet\\\nand *leaves*");
+        assert_eq!(parse_inline(&md), spans);
     }
 
     #[test]
