@@ -2841,7 +2841,7 @@ impl BoardView {
                                         .frame(false)
                                         .min_size(vec2(22.0, 22.0)),
                                 )
-                                .on_hover_text(tip)
+                                .on_hover_text(keys(tip))
                                 .clicked()
                             };
                             if editing {
@@ -3259,7 +3259,9 @@ impl BoardView {
                             .show(ui, |ui| {
                                 for (k, v) in rows {
                                     ui.label(
-                                        egui::RichText::new(k).monospace().color(theme.accent),
+                                        egui::RichText::new(keys(k))
+                                            .monospace()
+                                            .color(theme.accent),
                                     );
                                     ui.label(egui::RichText::new(v).color(theme.ui_text));
                                     ui.end_row();
@@ -3321,5 +3323,14 @@ fn capitalize(s: &str) -> String {
     match c.next() {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => String::new(),
+    }
+}
+
+/// Shortcut labels as this platform writes them (⌘ on macOS, Ctrl elsewhere).
+fn keys(s: &str) -> String {
+    if cfg!(target_os = "macos") {
+        s.to_string()
+    } else {
+        s.replace('⌘', "Ctrl+").replace('⇧', "Shift+")
     }
 }
