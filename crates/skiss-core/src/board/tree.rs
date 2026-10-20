@@ -5,7 +5,8 @@
 //! three connections, with three cards in a chain or under one parent), and one of these holds:
 //!
 //! - It is a chain: every card has at most one of them going out and one coming in ("Followed
-//!   by", "Then"). It reads in the direction of its arrows, so the source goes first.
+//!   by", "Then"). It is a timeline: the source goes first, and the layout puts it in a row
+//!   from left to right.
 //! - Every card has at most one going out: the target is the parent ("Reports to", "Part of").
 //! - Every card has at most one coming in: the source is the parent ("Manages", "Leads").
 //!

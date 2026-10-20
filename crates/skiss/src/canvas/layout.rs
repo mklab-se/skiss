@@ -490,7 +490,13 @@ fn tree_blocks(
         if (n < 3 && n < ids.len()) || members.iter().any(|&m| manual[m]) {
             continue;
         }
-        let (size, members) = arrange(r, &children, sizes, gap, LINKED_GAP.max(gap));
+        // A chain (one after another) is a timeline: time flows to the right. A tree grows down.
+        let chain = members.iter().all(|&m| children[m].len() <= 1);
+        let (size, members) = if chain {
+            in_a_row(r, &children, sizes, LINKED_GAP.max(gap))
+        } else {
+            arrange(r, &children, sizes, gap, LINKED_GAP.max(gap))
+        };
         out.push(Block {
             root: r,
             size,
@@ -498,6 +504,20 @@ fn tree_blocks(
         });
     }
     out
+}
+
+/// Lays out the chain starting at `i` from left to right, tops aligned.
+fn in_a_row(i: usize, children: &[Vec<usize>], sizes: &[Vec2], gap: f32) -> Subtree {
+    let mut members = Vec::new();
+    let (mut x, mut h) = (0.0f32, 0.0f32);
+    let mut cur = Some(i);
+    while let Some(c) = cur {
+        members.push((c, vec2(x, 0.0)));
+        x += sizes[c].x + gap;
+        h = h.max(sizes[c].y);
+        cur = children[c].first().copied();
+    }
+    (vec2(x - gap, h), members)
 }
 
 /// A laid-out subtree: its size, and each item with its position inside it.

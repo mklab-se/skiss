@@ -55,8 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as "Reports to", "Part of" or "Manages") gives every card at most one parent, has no cycles
   and links at least three cards, parents go on top with their children centered below. This
   works inside an area and between areas, so an org chart reads like one.
-- Chains ("Followed by", "Then": one before and one after each card) lay out in the direction of
-  their arrows, so a timeline reads from top to bottom.
+- Chains ("Followed by", "Then": one before and one after each card) are timelines: they lay out
+  in a row from left to right, so time flows to the right.
 - Resizing cards and areas from a corner grip; pasting copied cards between boards keeps them
   cards.
 
