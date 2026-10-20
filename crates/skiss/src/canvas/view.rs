@@ -4701,69 +4701,166 @@ impl BoardView {
     }
 
     fn help_overlay(&mut self, ui: &mut Ui, screen: Rect, theme: &Theme) {
-        let rows = [
-            ("Double-click", "new card / edit a card"),
-            ("Enter", "edit the selected card"),
-            ("Tab", "add the next card"),
-            ("Esc", "stop editing, clear selection"),
-            ("Esc Esc", "close skiss"),
-            ("Drag a card", "move it (into another area too)"),
-            ("Drag a dot on the edge", "connect two cards"),
-            ("Shift-drag", "select several"),
-            ("⌘F", "search (Enter for the next hit)"),
-            ("R", "everything about the selected card"),
-            ("A", "AI: spelling, rewriting, translating, pictures"),
-            ("⌘G", "group into a new area"),
+        // A key to press is drawn as a keycap; something to do with the mouse is written out.
+        enum K {
+            Keys(&'static [&'static str]),
+            Do(&'static str),
+        }
+        use K::{Do, Keys};
+        type Section = (&'static str, &'static [(K, &'static str)]);
+        const LEFT: &[Section] = &[
             (
-                "Drag the corner",
-                "resize (double-click it: automatic size)",
+                "Cards",
+                &[
+                    (Do("Double-click"), "new card, or edit one"),
+                    (Keys(&["Enter"]), "edit the selected card"),
+                    (Keys(&["Tab"]), "add the next card"),
+                    (Do("Drag a card"), "move it, into another area too"),
+                    (Do("Drag the corner"), "resize (double-click: automatic)"),
+                    (Keys(&["⌘G"]), "group into a new area"),
+                    (Keys(&["1", "–", "7", "0"]), "paper color, none"),
+                    (Keys(&["⌘V"]), "paste text or a picture"),
+                ],
             ),
-            ("⌘⇧L", "tidy up the layout"),
-            ("⌘B  ⌘I  ⌘E", "bold, italic, code"),
-            ("⇧Enter", "line break inside a paragraph"),
-            ("⌘L or [ ]", "turn a line into a task"),
-            ("⌘Z  ⌘Y", "undo, redo"),
-            ("Scroll / pinch", "pan and zoom"),
-            ("F  or  ⌘0", "fit everything"),
-            ("⌘⇧+  ⌘⇧−", "bigger text for sharing"),
-            ("1 – 7, 0", "paper color, none"),
-            ("⌘T", "switch theme"),
-            ("⌘V", "paste text or an image"),
+            (
+                "Connections",
+                &[
+                    (Do("Drag from an edge"), "connect two cards"),
+                    (Keys(&["R"]), "everything about the selected card"),
+                ],
+            ),
+            (
+                "Leaving",
+                &[
+                    (Keys(&["Esc"]), "stop editing, clear selection"),
+                    (Keys(&["Esc", "Esc"]), "close skiss"),
+                ],
+            ),
         ];
+        const RIGHT: &[Section] = &[
+            (
+                "Writing",
+                &[
+                    (Keys(&["⌘B", "⌘I", "⌘E"]), "bold, italic, code"),
+                    (Keys(&["⇧Enter"]), "line break in a paragraph"),
+                    (Keys(&["⌘L"]), "turn a line into a task"),
+                    (Keys(&["⌘Z", "⌘Y"]), "undo, redo"),
+                    (Keys(&["A"]), "AI: spelling, rewriting, pictures"),
+                ],
+            ),
+            (
+                "Finding and viewing",
+                &[
+                    (Keys(&["⌘F"]), "search (Enter for the next hit)"),
+                    (Do("Scroll or pinch"), "pan and zoom"),
+                    (Keys(&["F"]), "fit everything"),
+                    (Do("Shift-drag"), "select several"),
+                    (Keys(&["⌘⇧L"]), "tidy up the layout"),
+                    (Keys(&["⌘⇧+", "⌘⇧−"]), "bigger text for sharing"),
+                    (Keys(&["⌘T"]), "switch theme"),
+                ],
+            ),
+        ];
+
+        let pc = PromptColors::of(theme);
+        let ink = pc.text;
+        let soft = pc.muted;
+        let cap_fill = if theme.dark {
+            Color32::from_white_alpha(18)
+        } else {
+            Color32::WHITE
+        };
+        let cap_edge = if theme.dark {
+            Color32::from_white_alpha(40)
+        } else {
+            theme.card_stroke.gamma_multiply(0.55)
+        };
+        let section = |ui: &mut Ui, (name, rows): &Section| {
+            ui.label(
+                egui::RichText::new(*name)
+                    .family(theme.area_font.clone())
+                    .size(if theme.dark { 13.0 } else { 22.0 })
+                    .color(if theme.dark { theme.accent } else { ink }),
+            );
+            ui.add_space(2.0);
+            egui::Grid::new(("help", *name))
+                .num_columns(2)
+                .min_col_width(150.0)
+                .spacing(vec2(14.0, 7.0))
+                .show(ui, |ui| {
+                    for (k, what) in rows.iter() {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            match k {
+                                Keys(caps) => {
+                                    for cap in caps.iter() {
+                                        if *cap == "–" {
+                                            ui.label(egui::RichText::new("–").color(soft));
+                                            continue;
+                                        }
+                                        keycap(ui, &keys(cap), ink, cap_fill, cap_edge);
+                                    }
+                                }
+                                Do(text) => {
+                                    ui.label(
+                                        egui::RichText::new(*text).italics().size(13.5).color(soft),
+                                    );
+                                }
+                            }
+                        });
+                        ui.label(egui::RichText::new(*what).size(14.0).color(ink));
+                        ui.end_row();
+                    }
+                });
+            ui.add_space(14.0);
+        };
         egui::Area::new(egui::Id::unique("skiss-help"))
             .fixed_pos(screen.center())
             .pivot(Align2::CENTER_CENTER)
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
                 egui::Frame::new()
-                    .fill(theme.ui_bg)
+                    .fill(pc.bg)
+                    .stroke(Stroke::new(
+                        if theme.dark { 0.0 } else { 1.5 },
+                        theme.card_stroke,
+                    ))
                     .corner_radius(14.0)
-                    .inner_margin(egui::Margin::same(22))
+                    .inner_margin(egui::Margin::symmetric(28, 22))
+                    .shadow(egui::Shadow {
+                        offset: [0, 6],
+                        blur: 24,
+                        spread: 0,
+                        color: Color32::from_black_alpha(if theme.dark { 120 } else { 60 }),
+                    })
                     .show(ui, |ui| {
+                        ui.set_max_height(screen.height() - 80.0);
                         ui.label(
-                            egui::RichText::new("skiss shortcuts")
-                                .size(20.0)
-                                .color(theme.ui_text),
+                            egui::RichText::new("Shortcuts")
+                                .family(theme.title.clone())
+                                .size(34.0)
+                                .color(ink),
                         );
-                        ui.add_space(8.0);
-                        egui::Grid::new("help-grid")
-                            .spacing(vec2(24.0, 6.0))
-                            .show(ui, |ui| {
-                                for (k, v) in rows {
-                                    ui.label(
-                                        egui::RichText::new(keys(k))
-                                            .monospace()
-                                            .color(theme.accent),
-                                    );
-                                    ui.label(egui::RichText::new(v).color(theme.ui_text));
-                                    ui.end_row();
-                                }
+                        ui.add_space(10.0);
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.horizontal_top(|ui| {
+                                ui.spacing_mut().item_spacing.x = 36.0;
+                                ui.vertical(|ui| {
+                                    for sec in LEFT {
+                                        section(ui, sec);
+                                    }
+                                });
+                                ui.vertical(|ui| {
+                                    for sec in RIGHT {
+                                        section(ui, sec);
+                                    }
+                                });
                             });
-                        ui.add_space(8.0);
+                        });
                         ui.label(
-                            egui::RichText::new("Esc to close")
-                                .size(12.0)
-                                .color(theme.ui_text.gamma_multiply(0.6)),
+                            egui::RichText::new("Esc or ? to close")
+                                .size(12.5)
+                                .color(soft),
                         );
                     });
             });
@@ -4972,4 +5069,23 @@ fn pill(ui: &mut Ui, text: egui::RichText, on: bool, theme: &Theme, min: Vec2) -
     let nudge = if down { vec2(0.0, 1.0) } else { Vec2::ZERO };
     p.galley(r.center() - galley.size() / 2.0 + nudge, galley, color);
     resp
+}
+
+/// A key drawn as a small keycap.
+fn keycap(ui: &mut Ui, text: &str, ink: Color32, fill: Color32, edge: Color32) {
+    let galley = egui::WidgetText::from(egui::RichText::new(text).size(13.0).color(ink))
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        );
+    let size = vec2((galley.size().x + 12.0).max(24.0), galley.size().y + 6.0);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let p = ui.painter();
+    // A slightly deeper bottom edge makes it read as a key.
+    p.rect_filled(rect.translate(vec2(0.0, 1.5)), 5.0, edge);
+    p.rect_filled(rect, 5.0, fill);
+    p.rect_stroke(rect, 5.0, Stroke::new(1.0, edge), StrokeKind::Inside);
+    p.galley(rect.center() - galley.size() / 2.0, galley, ink);
 }
