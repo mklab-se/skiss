@@ -650,8 +650,13 @@ impl BoardView {
                     .max(9.0);
                 let font = FontId::new(size, theme.area_font.clone());
                 let g = p.layout_no_wrap(h.text.clone(), font, theme.text.gamma_multiply(fade));
-                // Sit on the frame's top edge, like a label on a folder tab.
-                let pos = pos2(sr.min.x + 8.0, sr.min.y - g.size().y * 0.55);
+                // Outer areas: on the frame's top edge, like a folder tab. Nested areas: just
+                // inside their frame, so they never collide with their parent's label.
+                let pos = if depth == 0 {
+                    pos2(sr.min.x + 8.0, sr.min.y - g.size().y * 0.55)
+                } else {
+                    pos2(sr.min.x + 6.0, sr.min.y + 4.0)
+                };
                 let bg = Rect::from_min_size(pos, g.size()).expand2(vec2(10.0, 5.0));
                 p.rect_filled(bg, 8.0, theme.bg.gamma_multiply(0.85 * fade));
                 p.galley(pos, g, theme.text);
@@ -1222,26 +1227,86 @@ impl BoardView {
                 }
             }
             if inner.height() > 3.0 && inner.width() > 6.0 {
-                let bar_h = (body_px * 0.7).max(1.0);
-                let mut y = top;
-                let mut i = 0;
-                while y + bar_h < inner.max.y && i < 6 {
-                    let w = if i == 0 {
-                        inner.width() * 0.7
-                    } else {
-                        inner.width() * (0.55 + 0.4 * ((i * 37 % 10) as f32 / 10.0))
-                    };
-                    let r = Rect::from_min_size(pos2(inner.min.x, y), vec2(w, bar_h));
-                    p.add(
-                        egui::epaint::RectShape::filled(
-                            r,
-                            bar_h / 2.0,
-                            theme.muted.gamma_multiply(0.35 * alpha),
-                        )
-                        .with_angle_and_pivot(angle, center),
-                    );
-                    y += bar_h * 2.2;
-                    i += 1;
+                // Lay the card out at full size and draw each text row as a soft bar, so the
+                // shape of the text stays recognizable; pictures stay pictures at any zoom.
+                let st = TextStyle {
+                    theme,
+                    scale: 1.0,
+                    color: theme.text,
+                    text_scale: self.text_scale,
+                };
+                let dir = self.doc.dir();
+                let images = &self.images;
+                let width = world.width() - CARD_PAD * 2.0;
+                let title = card.heading.as_ref().map(|h| title_spans(&h.spans));
+                let text = ctx.fonts_mut(|fonts| {
+                    let mut aspect = |url: &str| images.peek_aspect(&dir, url);
+                    content::layout(
+                        fonts,
+                        &st,
+                        title.as_deref(),
+                        &card.lines,
+                        width,
+                        &mut aspect,
+                    )
+                });
+                let k = zoom * s;
+                let clip = Rect::from_min_max(pos2(inner.min.x, top), inner.max);
+                let bar = theme.muted.gamma_multiply(0.35 * alpha);
+                for row in &text.rows {
+                    let pos = inner.min + row.offset * k;
+                    if row.kind == RowKind::Title && card.heading.is_some() && top > inner.min.y {
+                        continue;
+                    }
+                    match &row.kind {
+                        RowKind::Image(url) => {
+                            let r = Rect::from_min_size(pos, row.size * k);
+                            if r.min.y > inner.max.y {
+                                continue;
+                            }
+                            let p = &p.with_clip_rect(clip.intersect(p.clip_rect()));
+                            if let Some(tex) = self.images.texture(ctx, &dir, url) {
+                                let mut mesh = egui::Mesh::with_texture(tex.id());
+                                mesh.add_rect_with_uv(
+                                    r,
+                                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                                    Color32::WHITE.gamma_multiply(alpha),
+                                );
+                                if angle != 0.0 {
+                                    mesh.rotate(egui::emath::Rot2::from_angle(angle), center);
+                                }
+                                p.add(Shape::mesh(mesh));
+                            }
+                        }
+                        RowKind::Table => {
+                            let r = Rect::from_min_size(pos, row.size * k).intersect(clip);
+                            if r.is_positive() {
+                                p.add(
+                                    egui::epaint::RectShape::filled(
+                                        r,
+                                        2.0,
+                                        bar.gamma_multiply(0.6),
+                                    )
+                                    .with_angle_and_pivot(angle, center),
+                                );
+                            }
+                        }
+                        _ => {
+                            for prow in &row.galley.rows {
+                                let w = prow.rect().width() * k;
+                                let h = (prow.rect().height() * k * 0.55).max(1.0);
+                                let y = pos.y + (prow.pos.y + prow.rect().height() * 0.25) * k;
+                                let r =
+                                    Rect::from_min_size(pos2(pos.x, y), vec2(w, h)).intersect(clip);
+                                if r.is_positive() && w > 1.0 {
+                                    p.add(
+                                        egui::epaint::RectShape::filled(r, h / 2.0, bar)
+                                            .with_angle_and_pivot(angle, center),
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
         } else {
