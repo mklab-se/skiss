@@ -71,6 +71,8 @@ pub fn install(ctx: &egui::Context) {
 
     let mut set = |name: &str, primary: &[&str]| {
         let mut list: Vec<String> = primary.iter().map(|s| s.to_string()).collect();
+        // Key symbols (⌘ ⇧ ⌥ ⌃) come from JetBrains Mono; the text fonts do not have them.
+        list.push("JetBrainsMono".to_string());
         list.extend(fallback.iter().cloned());
         defs.families.insert(family(name), list);
     };
@@ -85,6 +87,7 @@ pub fn install(ctx: &egui::Context) {
     // UI widgets (start screen, prompts) use Hanken Grotesk too.
     if let Some(p) = defs.families.get_mut(&FontFamily::Proportional) {
         p.insert(0, "Hanken-Regular".to_string());
+        p.insert(1, "JetBrainsMono".to_string());
     }
     if let Some(m) = defs.families.get_mut(&FontFamily::Monospace) {
         m.insert(0, "JetBrainsMono".to_string());

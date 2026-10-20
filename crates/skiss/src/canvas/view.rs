@@ -849,29 +849,21 @@ impl BoardView {
         }
         let mut cs: Vec<C> = Vec::new();
         // Cards are obstacles; arrows look for the way around them that crosses the fewest.
+        // Routes are shaped in world space, so an arrow keeps its shape at every zoom.
         let obstacles: Vec<(String, Rect)> = self
             .layout
             .order
             .iter()
             .filter(|id| self.layout.get(id).is_some_and(|n| n.kind == Kind::Card))
-            .filter_map(|id| {
-                self.motion
-                    .rect(id)
-                    .map(|r| (id.clone(), cam.rect_to_screen(screen, r).shrink(2.0)))
-            })
+            .filter_map(|id| self.motion.rect(id).map(|r| (id.clone(), r.shrink(2.0))))
             .collect();
         for (from, to, label, note) in conns {
             let (Some(a), Some(b)) = (self.motion.rect(&from), self.motion.rect(&to)) else {
                 continue;
             };
-            let a = cam.rect_to_screen(screen, a);
-            let b = cam.rect_to_screen(screen, b);
-            // Choosing sides is the costly part: decide in world space, and only again when
-            // either card or the layout moved.
-            let (wa, wb) = (
-                self.motion.rect(&from).unwrap_or(Rect::NOTHING),
-                self.motion.rect(&to).unwrap_or(Rect::NOTHING),
-            );
+            // Choosing sides is the costly part: decide once, and again only when either card
+            // or the layout moved.
+            let (wa, wb) = (a, b);
             let key = (from.clone(), to.clone());
             let (sides, bend) = match self.route_cache.get(&key) {
                 Some((ra, rb, rev, sides, bend))
@@ -884,8 +876,8 @@ impl BoardView {
                     (*sides, *bend)
                 }
                 _ => {
-                    let frame = cam.rect_to_screen(screen, self.layout.bounds);
-                    let (sides, bend) = best_route(a, b, &obstacles, frame, &from, &to);
+                    let (sides, bend) =
+                        best_route(a, b, &obstacles, self.layout.bounds, &from, &to);
                     self.route_cache
                         .insert(key, (wa, wb, self.layout_key.0, sides, bend));
                     (sides, bend)
@@ -957,7 +949,7 @@ impl BoardView {
                 bend,
                 fracs,
             } = c;
-            if !screen.intersects(a.union(b)) {
+            if !screen.intersects(cam.rect_to_screen(screen, a.union(b)).expand(200.0)) {
                 continue;
             }
             let chosen = self
@@ -981,11 +973,15 @@ impl BoardView {
             let stroke = Stroke::new(width, color);
             let (p0, n0) = draw::port(a, sides.0, fracs.0);
             let (p3, n3) = draw::port(b, sides.1, fracs.1);
-            let (pts, mid, dir) = draw::curve_with(p0, n0, p3, n3, bend);
-            for q in &pts {
-                let w = cam.to_world(screen, *q);
-                self.ink = self.ink.union(Rect::from_min_max(w, w));
+            let (world_pts, mid, dir) = draw::curve_with(p0, n0, p3, n3, bend);
+            for w in &world_pts {
+                self.ink = self.ink.union(Rect::from_min_max(*w, *w));
             }
+            let pts: Vec<Pos2> = world_pts
+                .iter()
+                .map(|w| cam.to_screen(screen, *w))
+                .collect();
+            let mid = cam.to_screen(screen, mid);
             self.conn_paths
                 .push((from.clone(), to.clone(), pts.clone(), mid));
             draw::pencil_line(p, &pts, stroke, theme, &format!("{from}>{to}"), zoom);
@@ -3434,12 +3430,11 @@ impl BoardView {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 6.0;
                             let tb = |ui: &mut Ui, text: egui::RichText, tip: &str| {
-                                ui.add(
-                                    egui::Button::new(text.color(theme.ui_text))
-                                        .frame(false)
-                                        .min_size(vec2(22.0, 22.0)),
+                                hint(
+                                    pill(ui, text, true, theme, vec2(26.0, 26.0)),
+                                    keys(tip),
+                                    theme,
                                 )
-                                .on_hover_text(keys(tip))
                                 .clicked()
                             };
                             if editing {
@@ -3496,7 +3491,7 @@ impl BoardView {
                                         capitalize(c.name())
                                     ),
                                 };
-                                let resp = resp.on_hover_text(tip);
+                                let resp = hint(resp, tip, theme);
                                 if resp.clicked() {
                                     actions.push(ToolbarAction::Color(c));
                                 }
@@ -3899,7 +3894,7 @@ impl BoardView {
                             )
                             .frame(false)
                             .wrap();
-                            if ui.add(b).on_hover_text("Go there").clicked() {
+                            if hint(ui.add(b), "Go there", theme).clicked() {
                                 go = Some(target.to_string());
                             }
                         };
@@ -4305,26 +4300,17 @@ impl BoardView {
                     })
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 10.0;
+                            ui.spacing_mut().item_spacing.x = 6.0;
                             let mut b =
                                 |ui: &mut Ui,
                                  label: &str,
                                  tip: &str,
                                  on: bool,
                                  key: &'static str| {
-                                    let text = egui::RichText::new(label).size(14.0).color(if on {
-                                        theme.ui_text
-                                    } else {
-                                        theme.ui_text.gamma_multiply(0.35)
-                                    });
-                                    let r = ui.add_enabled(
-                                        on,
-                                        egui::Button::new(text)
-                                            .frame(false)
-                                            .min_size(vec2(30.0, 26.0)),
-                                    );
+                                    let text = egui::RichText::new(label).size(14.0);
+                                    let r = pill(ui, text, on, theme, vec2(30.0, 28.0));
                                     rects.push((key.to_string(), r.rect));
-                                    if r.on_hover_text(keys(tip)).clicked() {
+                                    if hint(r, keys(tip), theme).clicked() {
                                         act = Some(key);
                                     }
                                 };
@@ -4358,8 +4344,6 @@ impl BoardView {
                                 "tidy",
                             );
                             ui.separator();
-                            let name = if theme.dark { "Ember" } else { "Sketchbook" };
-                            b(ui, name, "Switch theme (⌘T)", true, "theme");
                             b(ui, "?", "Shortcuts", true, "help");
                         });
                     });
@@ -4384,7 +4368,6 @@ impl BoardView {
             }
             Some("group") => self.group_selected(screen),
             Some("tidy") => self.tidy_up(),
-            Some("theme") => return Some(UiRequest::ToggleTheme),
             Some("help") => self.help = !self.help,
             _ => {}
         }
@@ -4943,4 +4926,50 @@ fn best_route(
 /// clean switch, so an area never shows its name twice.
 fn map_fade(zoom: f32) -> f32 {
     if zoom < 0.45 { 1.0 } else { 0.0 }
+}
+
+/// A hover hint that reads well on the dark tooltip background of both themes.
+fn hint(resp: egui::Response, text: impl Into<String>, theme: &Theme) -> egui::Response {
+    let text = text.into();
+    resp.on_hover_ui(|ui| {
+        ui.label(egui::RichText::new(text).size(13.5).color(theme.ui_text));
+    })
+}
+
+/// A button that looks and feels like one: a soft pill that lights up under the pointer and
+/// presses in when clicked.
+fn pill(ui: &mut Ui, text: egui::RichText, on: bool, theme: &Theme, min: Vec2) -> egui::Response {
+    let base = theme.ui_text;
+    let color = if on { base } else { base.gamma_multiply(0.35) };
+    let galley = egui::WidgetText::from(text.color(color)).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let size = (galley.size() + vec2(20.0, 10.0)).max(min);
+    let sense = if on { Sense::click() } else { Sense::hover() };
+    let (rect, resp) = ui.allocate_exact_size(size, sense);
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(resp.id.with("hover"), on && resp.hovered(), 0.12);
+    let down = on && resp.is_pointer_button_down_on();
+    let r = if down { rect.shrink(1.5) } else { rect };
+    let p = ui.painter();
+    if on {
+        let fill = if down { 0.28 } else { 0.07 + 0.11 * hover };
+        p.rect_filled(r, 8.0, base.gamma_multiply(fill));
+        p.rect_stroke(
+            r,
+            8.0,
+            Stroke::new(1.0, base.gamma_multiply(0.14 + 0.2 * hover)),
+            StrokeKind::Inside,
+        );
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+    let nudge = if down { vec2(0.0, 1.0) } else { Vec2::ZERO };
+    p.galley(r.center() - galley.size() / 2.0 + nudge, galley, color);
+    resp
 }

@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Infinite zoom with levels of detail, a readable start view for big boards, every card showing
   all of its text (nothing is ever cut off or hidden behind a click), presenter text size (⌘⇧+ and ⌘⇧−), and springy animations that stop when nothing moves.
 - Two themes: Sketchbook (default) and Ember, switched with ⌘T or `--theme`.
-- A dock with + Card, + Area, Group, Tidy up (⌘⇧L), theme and help. Moving a card keeps
+- A dock with + Card, + Area, Group, Tidy up (⌘⇧L) and help, with buttons that press like
+  buttons and hints that are easy to read. Moving a card keeps
   everything else where it is; Tidy up lays the board out afresh.
 - Connections can be selected by clicking the line, renamed by double-clicking it or its label,
   and drawn by dragging from anywhere on a card's border. Double-click the board title to rename it.
@@ -44,8 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that fills the window. The board title grows with the board. Square and portrait pictures get
   narrower cards, and long prose gets a reading-width column. Tables stay tables when zoomed
   out. Area names show once at any zoom.
-- Arrows avoid passing under cards (so they never seem to point at the wrong one), avoid loops,
-  and stay inside the board. The opening view includes them.
+- Arrows keep their shape at every zoom. They avoid passing under cards (so they never seem to
+  point at the wrong one), avoid loops, and stay inside the board. The opening view includes
+  them.
 - Typing in a card only nudges the cards it covers; the rest of the board stays put.
 - Hierarchies lay out as trees, with nothing to configure. When one kind of connection (such
   as "Reports to", "Part of" or "Manages") gives every card at most one parent, has no cycles
