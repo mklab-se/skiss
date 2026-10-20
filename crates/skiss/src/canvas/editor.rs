@@ -38,10 +38,7 @@ impl ELine {
 
     /// Code blocks, tables and images are shown but not edited as text.
     pub fn is_atom(&self) -> bool {
-        matches!(
-            self.kind,
-            LineKind::Code(_) | LineKind::Raw | LineKind::Image { .. }
-        )
+        self.kind.is_atom()
     }
 
     pub fn is_list(&self) -> bool {
@@ -629,13 +626,7 @@ impl Editor {
         let mut first = true;
         for p in parsed {
             let chars = ELine::from_spans(&p.spans);
-            if first
-                && !self.lines[li].is_atom()
-                && !matches!(
-                    p.kind,
-                    LineKind::Code(_) | LineKind::Raw | LineKind::Image { .. }
-                )
-            {
+            if first && !self.lines[li].is_atom() && !p.kind.is_atom() {
                 self.lines[li].chars.extend(chars);
                 first = false;
                 continue;

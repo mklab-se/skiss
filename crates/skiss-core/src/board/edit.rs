@@ -129,7 +129,9 @@ pub fn lines_to_markdown(src: &str, lines: &[Line], original: &[Line]) -> String
                     inline::plain_text(&line.spans)
                 )),
                 LineKind::Image { alt, url } => out.push_str(&format!("![{alt}]({url})")),
-                LineKind::Raw => out.push_str(&inline::plain_text(&line.spans)),
+                LineKind::Raw | LineKind::Table | LineKind::Html { .. } => {
+                    out.push_str(&inline::plain_text(&line.spans))
+                }
             }
         }
         if is_list {

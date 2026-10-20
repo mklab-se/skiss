@@ -29,6 +29,15 @@ impl Images {
         })
     }
 
+    /// Height / width of an image that is already loaded (never loads: safe while fonts are
+    /// locked, during text layout).
+    pub fn peek_aspect(&self, dir: &Path, url: &str) -> Option<f32> {
+        match self.slots.get(&Self::resolve(dir, url)?)? {
+            Slot::Ready(_, a) => Some(*a),
+            Slot::Failed => None,
+        }
+    }
+
     /// Height / width of the image, loading it on first use.
     pub fn aspect(&mut self, ctx: &egui::Context, dir: &Path, url: &str) -> Option<f32> {
         match self.get(ctx, dir, url)? {

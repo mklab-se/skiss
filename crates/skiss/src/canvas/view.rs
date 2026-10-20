@@ -7,7 +7,7 @@ use egui::{
     Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
 use skiss_core::board::edit::{self, Edited};
-use skiss_core::board::{Board, Card, CardKind, Color, Line, NodeRef, Span};
+use skiss_core::board::{Board, Card, CardKind, Color, Line, LineKind, NodeRef, Span};
 
 use super::content::{self, CardText, Marker, RowKind, TextStyle};
 use super::document::Document;
@@ -105,6 +105,9 @@ pub struct BoardView {
 /// A connection label to draw on top of the cards.
 type Label = (Rect, std::sync::Arc<egui::Galley>, Color32);
 
+/// Text height (world units) a long card shows until it is selected.
+const COLLAPSED_HEIGHT: f32 = 420.0;
+
 const LIST_EPS: f32 = 4.0;
 
 impl BoardView {
@@ -189,10 +192,20 @@ impl BoardView {
         if !self.camera_ready {
             let b = self.layout.bounds;
             self.camera.jump_to(screen, b, 80.0, 1.15);
-            let target_zoom = self.camera.zoom;
-            let target_center = self.camera.center;
-            self.camera = Camera::new(target_center, target_zoom * 0.92);
-            self.camera.fly_to(screen, b, 80.0, 1.15);
+            // Too big to read when it all fits? Start readable, at the top left.
+            let readable = 0.62;
+            let target = if self.camera.zoom < readable {
+                let margin = Vec2::splat(70.0);
+                let view = (screen.size() - margin * 2.0) / readable;
+                Rect::from_min_size(b.min, view)
+            } else {
+                b
+            };
+            self.camera.jump_to(screen, target, 70.0, 1.15);
+            let (z, c) = (self.camera.zoom, self.camera.center);
+            // A gentle glide in as the cards pop up.
+            self.camera = Camera::new(c, z * 0.92);
+            self.camera.fly_to(screen, target, 70.0, 1.15);
             self.camera_ready = true;
         }
 
@@ -266,8 +279,29 @@ impl BoardView {
     // Layout
     // =========================================================================================
 
+    /// Cards shown at full length: the selected ones and the one being edited.
+    fn expanded(&self) -> Vec<String> {
+        let mut v = self.selection.clone();
+        if let Some(ed) = &self.editor {
+            v.push(ed.card_id.clone());
+        }
+        v.sort();
+        v
+    }
+
     fn relayout(&mut self, ctx: &egui::Context, theme: &Theme) {
-        let key = (self.doc.revision, self.text_scale, self.theme_rev);
+        let expanded = self.expanded();
+        let exp_hash = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            expanded.hash(&mut h);
+            h.finish()
+        };
+        let key = (
+            self.doc.revision ^ exp_hash.rotate_left(17),
+            self.text_scale,
+            self.theme_rev,
+        );
         if key == self.layout_key {
             return;
         }
@@ -279,13 +313,29 @@ impl BoardView {
             color: theme.text,
             text_scale: self.text_scale,
         };
-        let images = &mut self.images;
+        // Load images first: textures cannot be created while the fonts are locked.
+        for node in self.doc.board.walk() {
+            if let NodeRef::Card(c) = node {
+                for l in &c.lines {
+                    match &l.kind {
+                        LineKind::Image { url, .. }
+                        | LineKind::Html {
+                            image: Some(url), ..
+                        } => {
+                            self.images.aspect(ctx, &dir, url);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let images = &self.images;
         let board = &self.doc.board;
         let area_h = theme.area_size * 1.7 * self.text_scale;
         let title_h = theme.board_title_size * 1.2;
         let layout = ctx.fonts_mut(|fonts| {
             let mut measure = |card: &Card, width: f32| -> f32 {
-                let mut aspect = |url: &str| images.aspect(ctx, &dir, url);
+                let mut aspect = |url: &str| images.peek_aspect(&dir, url);
                 let title: Option<Vec<Span>> = card.heading.as_ref().map(|h| title_spans(&h.spans));
                 let t = content::layout(
                     fonts,
@@ -295,7 +345,14 @@ impl BoardView {
                     width,
                     &mut aspect,
                 );
-                t.size.y.max(theme.body_size * self.text_scale)
+                let full = t.size.y.max(theme.body_size * self.text_scale);
+                // Long cards rest collapsed and unfold when selected or edited.
+                let max = COLLAPSED_HEIGHT * self.text_scale;
+                if full > max * 1.15 && !expanded.contains(&card.id) {
+                    max
+                } else {
+                    full
+                }
             };
             layout::compute(board, &mut measure, area_h, title_h, theme.tilt)
         });
@@ -884,10 +941,36 @@ impl BoardView {
         let inner = Rect::from_min_max(sr.min + Vec2::splat(pad), sr.max - Vec2::splat(pad));
         let center = sr.center();
         if body_px < 5.0 {
-            // Too small to read: suggest the text with soft bars.
+            // Too small to read: keep the title readable like a map label, suggest the rest.
+            let mut top = inner.min.y;
+            if let Some(h) = &card.heading
+                && sr.width() > 40.0
+            {
+                let size = (theme.title_size * zoom * self.text_scale)
+                    .max(11.0 * self.text_scale)
+                    .min(sr.width() / 5.0);
+                if size >= 6.0 {
+                    let mut job = egui::text::LayoutJob::simple(
+                        h.text.clone(),
+                        FontId::new(size, theme.title.clone()),
+                        theme.text.gamma_multiply(alpha),
+                        (sr.width() - pad * 2.0).max(10.0),
+                    );
+                    job.wrap.max_rows = 2;
+                    let g = p.layout_job(job);
+                    let mut shape = egui::epaint::TextShape::new(
+                        draw::rotate(inner.min, center, angle),
+                        g.clone(),
+                        theme.text,
+                    );
+                    shape.angle = angle;
+                    p.add(shape);
+                    top += g.size().y + 2.0;
+                }
+            }
             if inner.height() > 3.0 && inner.width() > 6.0 {
                 let bar_h = (body_px * 0.7).max(1.0);
-                let mut y = inner.min.y;
+                let mut y = top;
                 let mut i = 0;
                 while y + bar_h < inner.max.y && i < 6 {
                     let w = if i == 0 {
@@ -928,9 +1011,9 @@ impl BoardView {
                     card.lines.clone(),
                 ),
             };
-            let images = &mut self.images;
+            let images = &self.images;
             let text = ctx.fonts_mut(|fonts| {
-                let mut aspect = |url: &str| images.aspect(ctx, &dir, url);
+                let mut aspect = |url: &str| images.peek_aspect(&dir, url);
                 content::layout(
                     fonts,
                     &st,
@@ -943,6 +1026,18 @@ impl BoardView {
             // Scaled text units -> screen: factor zoom/scale (close to 1).
             let k = zoom / scale * s;
             let origin = inner.min;
+            // A collapsed card shows its first part, fading out at the bottom.
+            let clipped = !editing && text.size.y * k > inner.height() + 3.0;
+            let outer_p = p;
+            let cut = inner.max.y - 12.0 * zoom;
+            let clip_p = if clipped {
+                p.with_clip_rect(
+                    Rect::from_min_max(sr.min, pos2(sr.max.x, cut)).intersect(p.clip_rect()),
+                )
+            } else {
+                p.clone()
+            };
+            let p = &clip_p;
             let placeholder = editing
                 && title
                     .as_ref()
@@ -951,6 +1046,38 @@ impl BoardView {
                 let pos = origin + row.offset * k;
                 let rpos = draw::rotate(pos, center, angle);
                 match &row.kind {
+                    RowKind::Table => {
+                        let ink = theme.muted.gamma_multiply(0.45 * alpha);
+                        let w = row.size.x * k;
+                        if let Some(first) = row.rules.first() {
+                            let head = Rect::from_min_size(pos, vec2(w, first * k));
+                            let tint = if theme.dark {
+                                Color32::from_white_alpha(10)
+                            } else {
+                                Color32::from_black_alpha(10)
+                            };
+                            p.add(
+                                egui::epaint::RectShape::filled(head, 3.0, tint)
+                                    .with_angle_and_pivot(angle, center),
+                            );
+                        }
+                        for y in row.rules.iter().take(row.rules.len().saturating_sub(1)) {
+                            let a = draw::rotate(pos + vec2(0.0, y * k), center, angle);
+                            let b = draw::rotate(pos + vec2(w, y * k), center, angle);
+                            p.line_segment([a, b], Stroke::new(1.0, ink));
+                        }
+                        for (g, off) in &row.cells {
+                            let mut sh = egui::epaint::TextShape::new(
+                                draw::rotate(pos + *off * k, center, angle),
+                                g.clone(),
+                                theme.text,
+                            );
+                            sh.angle = angle;
+                            sh.opacity_factor = alpha;
+                            p.add(sh);
+                        }
+                        continue;
+                    }
                     RowKind::Image(url) => {
                         let size = row.size * k;
                         let r = Rect::from_min_size(pos, size);
@@ -1112,6 +1239,39 @@ impl BoardView {
                 // Links are clickable (when not editing this card).
                 if !editing {
                     self.collect_links(row, pos, k, &lines);
+                }
+            }
+            if clipped {
+                let fade_h = (46.0 * zoom).min(inner.height() * 0.5);
+                let band = Rect::from_min_max(
+                    pos2(sr.min.x + 2.0, cut - fade_h),
+                    pos2(sr.max.x - 2.0, cut),
+                );
+                let mut mesh = egui::Mesh::default();
+                let top = fill.gamma_multiply(0.0);
+                let bottom = fill.gamma_multiply(alpha);
+                let i = mesh.vertices.len() as u32;
+                mesh.colored_vertex(band.left_top(), top);
+                mesh.colored_vertex(band.right_top(), top);
+                mesh.colored_vertex(band.right_bottom(), bottom);
+                mesh.colored_vertex(band.left_bottom(), bottom);
+                mesh.add_triangle(i, i + 1, i + 2);
+                mesh.add_triangle(i, i + 2, i + 3);
+                outer_p.add(Shape::mesh(mesh));
+                let more = Rect::from_min_max(
+                    pos2(sr.min.x + 2.0, cut),
+                    pos2(sr.max.x - 2.0, sr.max.y - 2.0),
+                );
+                outer_p.rect_filled(more, 0.0, fill.gamma_multiply(alpha));
+                let size = (theme.body_size * 0.62 * zoom * self.text_scale).max(6.0);
+                if size >= 7.0 {
+                    outer_p.text(
+                        pos2(sr.center().x, (cut + sr.max.y) / 2.0),
+                        Align2::CENTER_CENTER,
+                        "· · ·  more",
+                        FontId::new(size, FontFamily::Proportional),
+                        theme.muted.gamma_multiply(alpha),
+                    );
                 }
             }
             if editing {

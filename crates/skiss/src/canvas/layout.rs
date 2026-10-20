@@ -69,7 +69,7 @@ pub fn card_width(card: &Card) -> f32 {
     let has_code = card
         .lines
         .iter()
-        .any(|l| matches!(l.kind, LineKind::Code(_) | LineKind::Raw));
+        .any(|l| matches!(l.kind, LineKind::Code(_) | LineKind::Raw | LineKind::Table));
     match card.kind {
         _ if has_image => 340.0,
         _ if has_code => 360.0,

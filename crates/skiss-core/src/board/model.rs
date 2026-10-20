@@ -44,8 +44,30 @@ pub enum LineKind {
         alt: String,
         url: String,
     },
-    /// Tables, HTML and anything else shown as-is.
+    /// A table; the spans hold its source, which is never rewritten.
+    Table,
+    /// An HTML block shown as readable text (and its first local image); the spans hold the
+    /// source, which is never rewritten.
+    Html {
+        text: String,
+        image: Option<String>,
+    },
+    /// Anything else shown as-is.
     Raw,
+}
+
+impl LineKind {
+    /// Lines shown but not edited as text (their source is kept byte for byte).
+    pub fn is_atom(&self) -> bool {
+        matches!(
+            self,
+            LineKind::Code(_)
+                | LineKind::Raw
+                | LineKind::Table
+                | LineKind::Html { .. }
+                | LineKind::Image { .. }
+        )
+    }
 }
 
 /// One line of a card body as it is displayed: a paragraph, a list item, a code block...
@@ -620,6 +642,9 @@ impl<'s> Parser<'s> {
         let src = self.src;
         match &b.kind {
             BlockKind::Rule => {}
+            BlockKind::Html
+                if html_text(&src[b.range.clone()]).is_empty()
+                    && html_local_image(&src[b.range.clone()]).is_none() => {}
             BlockKind::List(_) if !b.is_task_list() => {
                 for item in &b.children {
                     let text = blocks::item_text_range(src, item);
@@ -776,9 +801,22 @@ impl<'s> Parser<'s> {
             }
             BlockKind::Rule | BlockKind::Heading(_) => {}
             BlockKind::Item => {}
-            BlockKind::Html | BlockKind::Table => {
+            BlockKind::Html => {
+                let raw = &src[range.clone()];
                 lines.push(Line {
-                    kind: LineKind::Raw,
+                    kind: LineKind::Html {
+                        text: html_text(raw),
+                        image: html_local_image(raw),
+                    },
+                    depth,
+                    spans: vec![Span::plain(raw.to_string())],
+                    orig: range,
+                    task_at: None,
+                });
+            }
+            BlockKind::Table => {
+                lines.push(Line {
+                    kind: LineKind::Table,
                     depth,
                     spans: vec![Span::plain(src[range.clone()].to_string())],
                     orig: range,
@@ -814,6 +852,108 @@ pub fn body_lines(src: &str) -> Vec<Line> {
         l.task_at = None;
     }
     lines
+}
+
+/// The readable text of an HTML block: tags removed, entities decoded, alt texts of remote
+/// images kept (so a row of badges reads "CI · crates.io").
+pub fn html_text(html: &str) -> String {
+    let mut out = String::new();
+    let mut rest = html;
+    let mut alts: Vec<String> = Vec::new();
+    while let Some(i) = rest.find('<') {
+        out.push_str(&rest[..i]);
+        let Some(j) = rest[i..].find('>') else {
+            rest = "";
+            break;
+        };
+        let tag = &rest[i + 1..i + j];
+        let lower = tag.to_lowercase();
+        if lower.starts_with("!--") {
+            // Comments are invisible, as in any viewer.
+            let end = rest[i..].find("-->").map_or(rest.len(), |e| i + e + 3);
+            rest = &rest[end..];
+            continue;
+        }
+        if lower.starts_with("br")
+            || lower.starts_with("/p")
+            || lower.starts_with("/h")
+            || lower.starts_with("/div")
+        {
+            out.push(' ');
+        }
+        if lower.starts_with("img")
+            && let Some(alt) = attr(tag, "alt")
+            && attr(tag, "src").is_some_and(|s| s.starts_with("http"))
+            && !alt.is_empty()
+        {
+            alts.push(alt);
+        }
+        rest = &rest[i + j + 1..];
+    }
+    out.push_str(rest);
+    let text = decode_entities(&out);
+    let mut text: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.is_empty() && !alts.is_empty() {
+        text = alts.join(" · ");
+    }
+    text
+}
+
+/// The first `<img>` with a local `src` in an HTML block.
+pub fn html_local_image(html: &str) -> Option<String> {
+    let mut rest = html;
+    while let Some(i) = rest.to_lowercase().find("<img") {
+        let end = rest[i..].find('>').map_or(rest.len(), |e| i + e);
+        let tag = &rest[i + 1..end];
+        if let Some(src) = attr(tag, "src")
+            && !src.starts_with("http")
+            && !src.starts_with("data:")
+        {
+            return Some(src);
+        }
+        rest = &rest[end..];
+    }
+    None
+}
+
+fn attr(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_lowercase();
+    let mut from = 0;
+    while let Some(i) = lower[from..].find(name) {
+        let at = from + i;
+        let before_ok = at == 0 || lower.as_bytes()[at - 1].is_ascii_whitespace();
+        let after = lower[at + name.len()..].trim_start();
+        if before_ok && after.starts_with('=') {
+            let v = tag[tag.len() - after.len() + 1..].trim_start();
+            let quote = v.chars().next()?;
+            if quote == '"' || quote == '\'' {
+                let inner = &v[1..];
+                return inner.find(quote).map(|e| decode_entities(&inner[..e]));
+            }
+            return Some(
+                v.split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_end_matches('/')
+                    .to_string(),
+            );
+        }
+        from = at + name.len();
+    }
+    None
+}
+
+fn decode_entities(s: &str) -> String {
+    s.replace("&nbsp;", " ")
+        .replace("&middot;", "·")
+        .replace("&mdash;", "\u{2014}")
+        .replace("&ndash;", "–")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
 }
 
 fn is_appendix(text: &str) -> bool {
@@ -1070,6 +1210,18 @@ Agreed on an API freeze by 1 November.
         assert!(b.card("notes").is_some());
         assert!(b.card("notes-1").is_some());
         assert_eq!(b.card("notes-1").unwrap().key, "Notes (2)");
+    }
+
+    #[test]
+    fn html_blocks_read_as_text() {
+        let html = "<p align=\"center\">\n  <strong>mdeck 2</strong> is here &middot; <a href=\"x\">news</a>\n</p>";
+        assert_eq!(html_text(html), "mdeck 2 is here · news");
+        let badges = "<p><a href=\"x\"><img src=\"https://img/ci.svg\" alt=\"CI\"></a> <img src=\"https://b\" alt=\"crates.io\"></p>";
+        assert_eq!(html_text(badges), "CI · crates.io");
+        let logo =
+            "<p align=\"center\"><img src=\"media/logo.png\" alt=\"mdeck\" width=\"560\"></p>";
+        assert_eq!(html_local_image(logo).as_deref(), Some("media/logo.png"));
+        assert_eq!(html_text("<!-- just a comment -->"), "");
     }
 
     #[test]
