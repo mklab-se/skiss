@@ -819,6 +819,53 @@ pub fn insert_area(
     })
 }
 
+/// Pastes Markdown copied from a board (this one or another): titled cards and areas keep their
+/// structure, re-levelled to fit the target area; plain text becomes loose cards.
+pub fn paste_markdown(board: &Board, src: &str, area_id: &str, md: &str) -> Option<Edited> {
+    let area = board.area(area_id)?;
+    let md = md.trim();
+    if md.is_empty() {
+        return None;
+    }
+    let min_level = blocks::parse_blocks(md)
+        .iter()
+        .filter_map(|b| match b.kind {
+            BlockKind::Heading(l) => Some(l),
+            _ => None,
+        })
+        .min();
+    let Some(min_level) = min_level else {
+        return insert_loose(board, src, area_id, md);
+    };
+    let level = area.child_level.clamp(1, 6);
+    let text = shift_headings(md, level as i32 - min_level as i32);
+    // Text before the first heading stays loose in the area; the rest goes at its end.
+    let first_heading = blocks::parse_blocks(&text)
+        .iter()
+        .find(|b| matches!(b.kind, BlockKind::Heading(_)))
+        .map(|b| b.range.start)
+        .unwrap_or(0);
+    let (loose, sections) = text.split_at(first_heading);
+    let at = if area.id.is_empty() {
+        board.content_end()
+    } else {
+        area.section.end.min(board.content_end())
+    };
+    let (mut source, start) = insert_block(src, at, sections.trim());
+    if !loose.trim().is_empty() {
+        let b = Board::parse(&source);
+        if let Some(e) = insert_loose(&b, &source, area_id, loose.trim()) {
+            let shift = e.source.len() - source.len();
+            source = e.source;
+            return Some(Edited {
+                source,
+                at: if e.at <= start { start + shift } else { start },
+            });
+        }
+    }
+    Some(Edited { source, at: start })
+}
+
 /// Adds a loose block (an image, a paragraph) to the end of an area's loose content.
 pub fn insert_loose(board: &Board, src: &str, area_id: &str, block: &str) -> Option<Edited> {
     let area = board.area(area_id)?;
@@ -1146,6 +1193,31 @@ Tech lead.
         let nb = Board::parse(&e.source);
         assert!(nb.area("risks").is_some());
         assert_eq!(node_at(&nb, e.at).unwrap().id(), "new-card");
+    }
+
+    #[test]
+    fn pasted_cards_fit_the_target_level() {
+        let b = Board::parse(SRC);
+        let copied = "## Lisa Nord\nPrivacy.\n\n## Per Holm\nLegal.";
+        let e = paste_markdown(&b, SRC, "people", copied).unwrap();
+        assert!(
+            e.source.contains(
+                "Tech lead.\n\n### Lisa Nord\nPrivacy.\n\n### Per Holm\nLegal.\n\n## Next steps"
+            ),
+            "{}",
+            e.source
+        );
+        let nb = Board::parse(&e.source);
+        assert_eq!(nb.parent_area("lisa-nord").unwrap().id, "people");
+        assert_eq!(node_at(&nb, e.at).unwrap().id(), "lisa-nord");
+        // Plain text becomes a loose card.
+        let e = paste_markdown(&b, SRC, "", "Just a thought").unwrap();
+        assert!(
+            Board::parse(&e.source)
+                .walk()
+                .iter()
+                .any(|n| matches!(n, NodeRef::Card(c) if c.kind == CardKind::Block))
+        );
     }
 
     #[test]

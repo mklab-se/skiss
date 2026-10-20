@@ -16,6 +16,7 @@
 //! scroll 0 -120               # pan
 //! pinch 1.5                   # zoom around the pointer
 //! pasteimage                  # paste a generated test picture
+//! paste ## Card\nText         # paste text (\n is a line break)
 //! shot /tmp/out.png
 //! quit
 //! ```
@@ -50,6 +51,8 @@ enum Step {
     Shot(PathBuf),
     /// Pastes a generated test picture, as if copied from a screenshot tool.
     PasteImage,
+    /// Pastes text (`\n` for line breaks), without touching the real clipboard.
+    PasteText(String),
     Quit,
 }
 
@@ -115,7 +118,7 @@ impl Script {
         let text = std::fs::read_to_string(path).ok()?;
         let mut steps = VecDeque::new();
         for line in text.lines() {
-            let line = line.split(" #").next().unwrap_or("").trim();
+            let line = line.split("  #").next().unwrap_or("").trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
@@ -189,6 +192,7 @@ impl Script {
             "pinch" => Step::Pinch(words.first()?.parse().ok()?),
             "shot" => Step::Shot(PathBuf::from(rest.trim())),
             "pasteimage" => Step::PasteImage,
+            "paste" => Step::PasteText(rest.replace("\\n", "\n")),
             "quit" => Step::Quit,
             _ => return None,
         })
@@ -204,6 +208,13 @@ impl Script {
         ctx.request_repaint();
         if let Some(events) = self.frames.pop_front() {
             let m = self.held.pop_front().unwrap_or_default();
+            if std::env::var("SKISS_DEBUG").is_ok() {
+                for e in &events {
+                    if !matches!(e, Event::PointerMoved(_)) {
+                        eprintln!("script t={:.2}: {e:?}", raw.time.unwrap_or(0.0));
+                    }
+                }
+            }
             raw.events.push(Event::ModifiersChanged(m));
             raw.events.extend(events);
             return;
@@ -360,6 +371,7 @@ impl Script {
                 self.frames
                     .push_back(vec![Event::PasteImage(std::sync::Arc::new(img))]);
             }
+            Step::PasteText(t) => self.frames.push_back(vec![Event::Paste(t)]),
             Step::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
     }

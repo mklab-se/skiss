@@ -88,6 +88,17 @@ Pasted images are saved next to the file in `notes.assets/`.
 - **Connect.** Drag from a card's border (or one of its dots) to another card, and say how they are
   connected. Click a line or its label to select it, double-click to rename it, Delete removes it.
 - **Rename.** Double-click a card to edit it, an area's title or the board title to rename them.
+- **Resize.** Drag the corner grip of a selected card or area; double-click the grip for automatic
+  size again.
+- **Find.** ⌘F searches the board: hits light up, Enter flies to the next one, and color chips
+  (with their names, such as Blocked) filter by color. R shows everything about the selected card:
+  its arrows both ways and every card that links to it or mentions it.
+- **Copy and paste.** ⌘C copies the selected cards as Markdown; paste them into any board and they
+  arrive as cards again, fitted to the area you paste into.
+- **AI help.** A on a selected card (or AI in its toolbar) fixes spelling, makes text clearer or
+  shorter, translates, or draws a picture from the card, using your own models through
+  [Ailloy](https://crates.io/crates/ailloy) (`skiss ai config` to set them up). Every change is one
+  undo step; pictures keep their prompt as alt text and can be redrawn.
 - **Zoom.** Pinch, ⌘-scroll or a mouse wheel zooms, without limits. Far out, cards turn into a map
   of titles; close in, everything is readable. F fits everything. ⌘⇧+ makes text and lines bigger
   for sharing your screen.

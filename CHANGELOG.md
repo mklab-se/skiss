@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The prompt comes back right away (the window runs on its own; `--wait` stays attached). Esc
   twice closes the window. The start screen picks a folder or opens an existing file.
 
+- Search (⌘F) with color filters, and the related panel (R) for everything about a card.
+- AI help through Ailloy: fix spelling, make clearer, shorten, translate, picture from a card,
+  redraw a picture.
+- Arrows route around cards instead of under them.
+- Resizing cards and areas from a corner grip; pasting copied cards between boards keeps them
+  cards.
+
 ### Changed
 
 - MSRV 1.88 to 1.95, required by egui/eframe 0.37.

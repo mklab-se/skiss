@@ -41,10 +41,18 @@ enum Drag {
         to: Option<String>,
     },
     SelectText,
+    /// Dragging the corner grip of a card or area.
+    Resize {
+        id: String,
+        min: Pos2,
+    },
 }
 
 #[derive(Clone, Debug)]
 enum Hot {
+    Resize {
+        id: String,
+    },
     Checkbox {
         card: String,
         at: Option<usize>,
@@ -149,6 +157,8 @@ pub struct BoardView {
     focus: Option<std::collections::HashSet<String>>,
     /// AI requests in flight.
     ai_jobs: Vec<ai::Job>,
+    /// Chosen arrow sides per connection, with the card rects they were chosen for.
+    route_cache: HashMap<(String, String), (Rect, Rect, u64, (u8, u8))>,
     /// The AI menu under the toolbar, and where it opens.
     ai_menu: Option<Pos2>,
 }
@@ -207,6 +217,7 @@ impl BoardView {
             about: None,
             focus: None,
             ai_jobs: Vec::new(),
+            route_cache: HashMap::new(),
             ai_menu: None,
         }
     }
@@ -270,7 +281,8 @@ impl BoardView {
         }
 
         // Keyboard (unless a prompt has focus).
-        let field_focus = self.prompt.is_some() || ui.ctx().memory(|m| m.focused().is_some());
+        // Only a text field takes the keyboard; a clicked button must not swallow shortcuts.
+        let field_focus = self.prompt.is_some() || ui.ctx().text_edit_focused();
         if !field_focus {
             request = self.keyboard(ui, screen, theme);
         }
@@ -748,6 +760,25 @@ impl BoardView {
     }
 
     fn paint_handles(&mut self, p: &egui::Painter, id: &str, sr: Rect, theme: &Theme) {
+        // The corner grip for resizing the selected card or area.
+        if self.editor.is_none()
+            && self.selection.len() == 1
+            && self.selection[0] == id
+            && sr.width() > 50.0
+            && matches!(self.drag, Drag::None | Drag::Resize { .. })
+        {
+            let c = sr.right_bottom() - vec2(5.0, 5.0);
+            for k in [4.0f32, 8.0, 12.0] {
+                p.line_segment(
+                    [c + vec2(-k, 0.0), c + vec2(0.0, -k)],
+                    Stroke::new(1.4, theme.accent.gamma_multiply(0.85)),
+                );
+            }
+            self.hots.push((
+                Rect::from_center_size(c - vec2(4.0, 4.0), Vec2::splat(20.0)),
+                Hot::Resize { id: id.to_string() },
+            ));
+        }
         let show = self.editor.is_none()
             && matches!(self.drag, Drag::None)
             && (self.hover.as_deref() == Some(id)
@@ -823,7 +854,30 @@ impl BoardView {
             };
             let a = cam.rect_to_screen(screen, a);
             let b = cam.rect_to_screen(screen, b);
-            let sides = best_sides(a, b, &obstacles, &from, &to);
+            // Choosing sides is the costly part: decide in world space, and only again when
+            // either card or the layout moved.
+            let (wa, wb) = (
+                self.motion.rect(&from).unwrap_or(Rect::NOTHING),
+                self.motion.rect(&to).unwrap_or(Rect::NOTHING),
+            );
+            let key = (from.clone(), to.clone());
+            let sides = match self.route_cache.get(&key) {
+                Some((ra, rb, rev, sides))
+                    if *rev == self.layout_key.0
+                        && (ra.min - wa.min).length() < 0.5
+                        && (rb.min - wb.min).length() < 0.5
+                        && (ra.size() - wa.size()).length() < 0.5
+                        && (rb.size() - wb.size()).length() < 0.5 =>
+                {
+                    *sides
+                }
+                _ => {
+                    let sides = best_sides(a, b, &obstacles, &from, &to);
+                    self.route_cache
+                        .insert(key, (wa, wb, self.layout_key.0, sides));
+                    sides
+                }
+            };
             cs.push(C {
                 from,
                 to,
@@ -1802,6 +1856,13 @@ impl BoardView {
 
     fn drag_overrides(&self, ui: &Ui, screen: Rect) -> HashMap<String, Rect> {
         let mut out = HashMap::new();
+        if let Drag::Resize { id, min } = &self.drag
+            && let Some(ptr) = ui.input(|i| i.pointer.latest_pos())
+        {
+            let w = self.camera.to_world(screen, ptr);
+            let max = pos2(w.x.max(min.x + 160.0), w.y.max(min.y + 60.0));
+            out.insert(id.clone(), Rect::from_min_max(*min, max));
+        }
         if let Drag::Move { offsets, .. } = &self.drag
             && let Some(ptr) = ui.input(|i| i.pointer.latest_pos())
         {
@@ -1818,6 +1879,14 @@ impl BoardView {
     fn pointer(&mut self, ui: &mut Ui, screen: Rect, response: &egui::Response, theme: &Theme) {
         let ptr = ui.input(|i| i.pointer.latest_pos());
         let mods = ui.input(|i| i.modifiers);
+        if std::env::var("SKISS_DEBUG").is_ok() && ui.input(|i| i.pointer.any_pressed()) {
+            eprintln!(
+                "press at {ptr:?}: canvas hovered {} layer {:?} hot {:?}",
+                response.hovered(),
+                ui.ctx().layer_id_at(ptr.unwrap_or_default()),
+                ptr.and_then(|p| self.hot_at(p))
+            );
+        }
         if response.hovered()
             && let Some(at) = ptr
         {
@@ -1854,6 +1923,7 @@ impl BoardView {
                         });
                     });
                 }
+                Some(Hot::Resize { .. }) => ui.ctx().set_cursor_icon(CursorIcon::ResizeNwSe),
                 Some(Hot::Checkbox { .. }) | Some(Hot::Handle { .. }) | Some(Hot::Label { .. }) => {
                     ui.ctx().set_cursor_icon(CursorIcon::PointingHand)
                 }
@@ -1888,7 +1958,13 @@ impl BoardView {
             } else {
                 None
             };
-            if let Some(Hot::Handle { id }) = hot {
+            if let Some(Hot::Resize { id }) = &hot {
+                let min = self.motion.rect(id).map_or(Pos2::ZERO, |r| r.min);
+                self.drag = Drag::Resize {
+                    id: id.clone(),
+                    min,
+                };
+            } else if let Some(Hot::Handle { id }) = hot {
                 self.drag = Drag::Connect { from: id, to: None };
             } else if let Some(id) = edge {
                 self.drag = Drag::Connect { from: id, to: None };
@@ -1973,6 +2049,21 @@ impl BoardView {
             let drag = std::mem::replace(&mut self.drag, Drag::None);
             match drag {
                 Drag::Move { ids, .. } => self.drop_moved(ui, screen, &ids, ptr),
+                Drag::Resize { id, min } => {
+                    if let Some(p) = ptr {
+                        let w = self.camera.to_world(screen, p);
+                        let size = (
+                            (w.x - min.x).max(160.0).round() as i32,
+                            (w.y - min.y).max(60.0).round() as i32,
+                        );
+                        if let Some(key) = self.doc.board.node(&id).map(|n| n.key().to_string()) {
+                            let src = edit::with_appendix(&self.doc.board, &self.doc.source, |a| {
+                                a.entry_mut(&key).size = Some(size);
+                            });
+                            self.doc.apply(src, &self.selection, None);
+                        }
+                    }
+                }
                 Drag::Lasso { start } => {
                     if let Some(end) = ptr {
                         let r = Rect::from_two_pos(start, end);
@@ -2049,6 +2140,15 @@ impl BoardView {
         let hot = self.hot_at(at);
         let hit = self.hit(screen, at);
         let editing_id = self.editor.as_ref().map(|e| e.card_id.clone());
+        if let Some(Hot::Resize { id }) = &hot {
+            if double && let Some(key) = self.doc.board.node(id).map(|n| n.key().to_string()) {
+                let src = edit::with_appendix(&self.doc.board, &self.doc.source, |a| {
+                    a.entry_mut(&key).size = None
+                });
+                self.doc.apply(src, &self.selection, None);
+            }
+            return;
+        }
 
         if let Some(Hot::Checkbox {
             card,
@@ -3202,7 +3302,7 @@ impl BoardView {
         }
         let area = self.target_area();
         if let Some(Edited { source, at }) =
-            edit::insert_loose(&self.doc.board, &self.doc.source, &area, text)
+            edit::paste_markdown(&self.doc.board, &self.doc.source, &area, text)
         {
             self.doc.apply(source, &self.selection, None);
             self.motion.spawn_from = Some(self.camera.center);
@@ -4595,6 +4695,10 @@ impl BoardView {
             ("R", "everything about the selected card"),
             ("A", "AI: spelling, rewriting, translating, pictures"),
             ("⌘G", "group into a new area"),
+            (
+                "Drag the corner",
+                "resize (double-click it: automatic size)",
+            ),
             ("⌘⇧L", "tidy up the layout"),
             ("⌘B  ⌘I  ⌘E", "bold, italic, code"),
             ("⌘L or [ ]", "turn a line into a task"),
