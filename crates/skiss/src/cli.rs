@@ -9,11 +9,22 @@ use clap::Parser;
 #[command(author, version, about)]
 #[command(
     long_about = "An infinite canvas for your notes, stored as Markdown.\n\n\
-    skiss is in early development: the canvas is not built yet. For now it offers \
-    the AI status/config, shell completions and version commands."
+    Open any Markdown file as a board: headings become areas and cards, \
+    \"- Manages [Erik](#erik)\" becomes an arrow, and every change is written \
+    straight back to the file as plain Markdown. Run without a file to pick a name; \
+    a file that does not exist yet is created."
 )]
 #[command(propagate_version = true)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct Cli {
+    /// The Markdown file to open (created if it does not exist)
+    #[arg(value_name = "FILE")]
+    pub file: Option<std::path::PathBuf>,
+
+    /// Theme for this window: sketchbook or ember (remembered from ⌘T otherwise)
+    #[arg(long, value_name = "THEME")]
+    pub theme: Option<String>,
+
     /// Increase output verbosity (-v for debug, -vv for trace)
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -88,14 +99,8 @@ impl Cli {
                 crate::banner::print_banner_with_version();
                 Ok(())
             }
-            // No subcommand: show who we are until `skiss <file.md>` opens a canvas.
-            None => {
-                crate::banner::print_banner_with_version();
-                println!(
-                    " The canvas is not built yet. Run `skiss --help` to see what works today."
-                );
-                Ok(())
-            }
+            // No subcommand: open the canvas (with the start screen if no file was given).
+            None => tokio::task::block_in_place(|| crate::canvas::run(self.file, self.theme)),
         }
     }
 }

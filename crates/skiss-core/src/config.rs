@@ -1,9 +1,8 @@
 //! Tool configuration.
 //!
-//! A minimal, reusable starting point: a YAML config stored in the platform
-//! config directory (`~/.config/skiss/config.yaml` on Linux/macOS). No
-//! command uses it yet; it's here so a new tool has somewhere obvious to grow
-//! its settings. Add fields to [`Config`] and they round-trip automatically.
+//! Per-user settings in `~/.config/skiss/config.yaml` (Linux/macOS). Nothing
+//! here is stored in skiss-files: the theme is how *you* like to look at a
+//! board, not part of the notes.
 
 use std::path::PathBuf;
 
@@ -15,8 +14,8 @@ use crate::error::{Error, Result};
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Example setting. Replace with your tool's real configuration.
-    pub example: Option<String>,
+    /// The canvas theme: `sketchbook` (default) or `ember`.
+    pub theme: Option<String>,
 }
 
 impl Config {
@@ -55,11 +54,11 @@ mod tests {
     #[test]
     fn round_trips_through_yaml() {
         let cfg = Config {
-            example: Some("hello".to_string()),
+            theme: Some("hello".to_string()),
         };
         let yaml = serde_norway::to_string(&cfg).unwrap();
         let parsed: Config = serde_norway::from_str(&yaml).unwrap();
-        assert_eq!(parsed.example.as_deref(), Some("hello"));
+        assert_eq!(parsed.theme.as_deref(), Some("hello"));
     }
 
     #[test]
@@ -67,25 +66,25 @@ mod tests {
         // Pins the exact bytes `save` writes, so a YAML library change cannot
         // silently alter existing config files.
         let set = Config {
-            example: Some("hello".to_string()),
+            theme: Some("hello".to_string()),
         };
-        assert_eq!(serde_norway::to_string(&set).unwrap(), "example: hello\n");
+        assert_eq!(serde_norway::to_string(&set).unwrap(), "theme: hello\n");
         let tricky = Config {
-            example: Some("a: b\nline two".to_string()),
+            theme: Some("a: b\nline two".to_string()),
         };
         assert_eq!(
             serde_norway::to_string(&tricky).unwrap(),
-            "example: |-\n  a: b\n  line two\n"
+            "theme: |-\n  a: b\n  line two\n"
         );
         assert_eq!(
             serde_norway::to_string(&Config::default()).unwrap(),
-            "example: null\n"
+            "theme: null\n"
         );
     }
 
     #[test]
     fn empty_yaml_uses_defaults() {
         let parsed: Config = serde_norway::from_str("{}").unwrap();
-        assert!(parsed.example.is_none());
+        assert!(parsed.theme.is_none());
     }
 }

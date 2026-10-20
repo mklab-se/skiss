@@ -1,10 +1,11 @@
-//! skiss: a template for building Rust command-line tools.
+//! skiss: an infinite canvas for your notes, stored as Markdown.
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 mod banner;
+mod canvas;
 mod cli;
 mod commands;
 mod update;

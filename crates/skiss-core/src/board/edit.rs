@@ -112,7 +112,9 @@ pub fn lines_to_markdown(src: &str, lines: &[Line], original: &[Line]) -> String
             out.push_str(&src[line.orig.clone()]);
         } else {
             let indent = " ".repeat(widths.iter().take(d).sum());
-            let md = inline::to_markdown(&line.spans);
+            // Never leave trailing spaces: they are invisible, and a line saved mid-typing
+            // ("word ") must not leave a stray space behind when the next save splices in.
+            let md = inline::to_markdown(&line.spans).trim_end().to_string();
             match &line.kind {
                 LineKind::Paragraph => out.push_str(&md),
                 LineKind::Bullet => out.push_str(&format!("{indent}- {md}")),
@@ -797,6 +799,49 @@ pub fn plain_line(kind: LineKind, depth: u8, text: &str) -> Line {
         orig: 0..0,
         task_at: None,
     }
+}
+
+/// Renames the heading of a card or an area (and keeps its decoration).
+pub fn rename_heading(board: &Board, src: &str, id: &str, title: &str) -> Option<Edited> {
+    let node = board.node(id)?;
+    let heading = node.heading()?;
+    let title = title.trim();
+    if title == heading.text {
+        return None;
+    }
+    let hashes = "#".repeat(heading.level as usize);
+    let line = if title.is_empty() {
+        hashes
+    } else {
+        format!("{hashes} {title}")
+    };
+    let start = node.range().start;
+    let mut out = splice(src, heading.line.clone(), &line);
+    let old_key = node.key().to_string();
+    if board.appendix.get(&old_key).is_some() {
+        let nb = Board::parse(&out);
+        if let Some(n) = nb
+            .walk()
+            .into_iter()
+            .find(|n| n.range().start == start && !n.id().is_empty())
+        {
+            let new_key = n.key().to_string();
+            out = with_appendix(&nb, &out, |a| a.rename(&old_key, &new_key));
+        }
+    }
+    Some(Edited {
+        source: out,
+        at: start,
+    })
+}
+
+/// The node (not the root) whose source starts at `at`.
+pub fn node_at(board: &Board, at: usize) -> Option<NodeRef<'_>> {
+    board
+        .walk()
+        .into_iter()
+        .filter(|n| !n.id().is_empty())
+        .find(|n| n.range().start == at)
 }
 
 #[cfg(test)]

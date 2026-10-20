@@ -514,7 +514,12 @@ impl<'s> Parser<'s> {
     }
 
     fn section_id(&mut self, heading: &Heading) -> String {
-        let anchor = self.slugger.next(&heading.text);
+        let text = if heading.text.trim().is_empty() {
+            "untitled"
+        } else {
+            heading.text.as_str()
+        };
+        let anchor = self.slugger.next(text);
         // Ids are the anchors, which are unique and stable while the title stays the same.
         self.anchors.insert(anchor.clone(), anchor.clone());
         anchor
@@ -784,6 +789,33 @@ impl<'s> Parser<'s> {
     }
 }
 
+/// Parses Markdown as the body of a card (for pasting several lines into a card).
+/// Headings become plain paragraphs. Source ranges are cleared: the text is not in the file.
+pub fn body_lines(src: &str) -> Vec<Line> {
+    let mut parser = Parser::new(src);
+    let mut lines = Vec::new();
+    let mut conns = Vec::new();
+    for b in blocks::parse_blocks(src) {
+        if let BlockKind::Heading(_) = b.kind {
+            let text = blocks::heading_text(src, b.range.clone());
+            lines.push(Line {
+                kind: LineKind::Paragraph,
+                depth: 0,
+                spans: inline::parse_inline(&text),
+                orig: 0..0,
+                task_at: None,
+            });
+            continue;
+        }
+        parser.body_block(&b, 0, false, &mut lines, &mut conns);
+    }
+    for l in &mut lines {
+        l.orig = 0..0;
+        l.task_at = None;
+    }
+    lines
+}
+
 fn is_appendix(text: &str) -> bool {
     text.trim_start().starts_with(appendix::OPEN)
 }
@@ -1006,7 +1038,7 @@ Agreed on an API freeze by 1 November.
             "> quote\n\n---\n\n<div>html</div>\n",
         ] {
             let b = Board::parse(src);
-            assert!(b.walk().len() >= 1, "{src:?}");
+            assert!(!b.walk().is_empty(), "{src:?}");
         }
     }
 
