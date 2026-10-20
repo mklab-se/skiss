@@ -15,6 +15,7 @@
 //! key cmd+b                   # modifiers: cmd, shift, alt, ctrl
 //! scroll 0 -120               # pan
 //! pinch 1.5                   # zoom around the pointer
+//! pasteimage                  # paste a generated test picture
 //! shot /tmp/out.png
 //! quit
 //! ```
@@ -47,6 +48,8 @@ enum Step {
     Scroll(f32, f32),
     Pinch(f32),
     Shot(PathBuf),
+    /// Pastes a generated test picture, as if copied from a screenshot tool.
+    PasteImage,
     Quit,
 }
 
@@ -186,6 +189,7 @@ impl Script {
             "scroll" => Step::Scroll(words.first()?.parse().ok()?, words.get(1)?.parse().ok()?),
             "pinch" => Step::Pinch(words.first()?.parse().ok()?),
             "shot" => Step::Shot(PathBuf::from(rest.trim())),
+            "pasteimage" => Step::PasteImage,
             "quit" => Step::Quit,
             _ => return None,
         })
@@ -339,6 +343,23 @@ impl Script {
                     }),
                 ));
                 self.wait_until = now + 0.5;
+            }
+            Step::PasteImage => {
+                let (w, h) = (480usize, 300usize);
+                let mut img = egui::ColorImage::filled([w, h], egui::Color32::WHITE);
+                for y in 0..h {
+                    for x in 0..w {
+                        let t = x as f32 / w as f32;
+                        let u = y as f32 / h as f32;
+                        img.pixels[y * w + x] = egui::Color32::from_rgb(
+                            (40.0 + 200.0 * t) as u8,
+                            (90.0 + 100.0 * u) as u8,
+                            (180.0 - 120.0 * t) as u8,
+                        );
+                    }
+                }
+                self.frames
+                    .push_back(vec![Event::PasteImage(std::sync::Arc::new(img))]);
             }
             Step::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }

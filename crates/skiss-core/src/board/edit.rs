@@ -84,7 +84,9 @@ pub fn lines_to_markdown(src: &str, lines: &[Line], original: &[Line]) -> String
     let mut first = true;
     for line in lines {
         let empty = line.spans.iter().all(|s| s.text.trim().is_empty());
-        if empty && matches!(line.kind, LineKind::Paragraph | LineKind::Quote) {
+        // Empty paragraphs and list items (a fresh line still being typed) are not written:
+        // "- [ ] " would leave a trailing space behind and is not even a task to Markdown.
+        if empty && (line.is_list() || matches!(line.kind, LineKind::Paragraph | LineKind::Quote)) {
             continue;
         }
         let is_list = line.is_list();

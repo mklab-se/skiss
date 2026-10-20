@@ -102,14 +102,14 @@ impl SkissApp {
         p.rect_filled(rect, 0.0, theme.bg);
         super::draw::grid(p, rect, egui::Pos2::ZERO, 1.0, &theme);
         p.text(
-            rect.center() - vec2(0.0, 120.0),
+            rect.center() - vec2(0.0, 205.0),
             Align2::CENTER_CENTER,
             "skiss",
             FontId::new(theme.board_title_size * 1.4, theme.title.clone()),
             theme.text,
         );
         p.text(
-            rect.center() - vec2(0.0, 66.0),
+            rect.center() - vec2(0.0, 142.0),
             Align2::CENTER_CENTER,
             "An infinite canvas for your notes, stored as Markdown",
             FontId::new(theme.body_size, theme.body.clone()),

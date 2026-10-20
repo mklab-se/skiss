@@ -100,6 +100,8 @@ pub struct BoardView {
     last_screen: Rect,
     /// A selected connection (by its label), for deleting it.
     selected_conn: Option<(String, String)>,
+    /// Bring the card being edited into view once its layout is known.
+    reveal_pending: bool,
 }
 
 /// A connection label to draw on top of the cards.
@@ -136,6 +138,7 @@ impl BoardView {
             theme_rev: 0,
             last_screen: Rect::NOTHING,
             selected_conn: None,
+            reveal_pending: false,
         }
     }
 
@@ -226,6 +229,15 @@ impl BoardView {
             .filter_map(|id| self.layout.get(id).map(|n| (id.clone(), n.rect)))
             .collect();
         let mut moving = self.motion.step(&targets, dt, &overrides);
+        if self.reveal_pending {
+            self.reveal_pending = false;
+            if let Some(id) = self.editor.as_ref().map(|e| e.card_id.clone())
+                && let Some(n) = self.layout.get(&id)
+            {
+                // The layout target, not the animated rect: that is where it is going.
+                self.camera.reveal(screen, n.rect, 70.0);
+            }
+        }
         moving |= self.camera.step(dt);
         moving |= self.step_tilts(dt);
 
@@ -1937,6 +1949,7 @@ impl BoardView {
             }
             self.editor = Some(ed);
         }
+        self.reveal_pending = true;
         // A fresh card and its first words are one undo step.
         if !fresh {
             self.doc.break_coalescing();
@@ -2320,7 +2333,7 @@ impl BoardView {
     }
 
     fn reveal_caret_card(&mut self) {
-        // Keep the card in view while it grows (handled by the camera next frame).
+        self.reveal_pending = true;
     }
 
     /// Up/down by visual row inside the editing card.
@@ -3149,7 +3162,7 @@ impl BoardView {
             && self.editor.is_none()
         {
             p.text(
-                screen.center() + vec2(0.0, 40.0),
+                screen.center() + vec2(0.0, 150.0),
                 Align2::CENTER_CENTER,
                 "Double-click anywhere to add your first card",
                 FontId::new(theme.body_size * 1.1, theme.body.clone()),

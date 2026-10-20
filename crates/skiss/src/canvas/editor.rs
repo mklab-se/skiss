@@ -354,6 +354,9 @@ impl Editor {
             if c == ' ' {
                 self.autoformat();
             }
+            if matches!(c, '*' | '_' | '`' | '~') {
+                self.inline_shortcut();
+            }
         }
         self.anchor = self.cursor;
         self.dirty = true;
@@ -387,6 +390,67 @@ impl Editor {
             line.kind = kind;
             line.orig = 0..0;
             self.cursor.col -= strip;
+        }
+    }
+
+    /// Markdown habits work while typing: `**bold**`, `*italic*`, `` `code` ``, `~~strike~~`.
+    fn inline_shortcut(&mut self) {
+        let li = self.cursor.line;
+        if self.lines[li].title {
+            return;
+        }
+        let col = self.cursor.col;
+        let chars: Vec<char> = self.lines[li].chars[..col].iter().map(|c| c.c).collect();
+        let rules: [(&str, fn(&mut Style) -> &mut bool); 5] = [
+            ("**", |s| &mut s.bold),
+            ("~~", |s| &mut s.strike),
+            ("`", |s| &mut s.code),
+            ("*", |s| &mut s.italic),
+            ("_", |s| &mut s.italic),
+        ];
+        for (delim, flag) in rules {
+            let d: Vec<char> = delim.chars().collect();
+            let n = d.len();
+            if chars.len() < n * 2 + 1 || chars[chars.len() - n..] != d[..] {
+                continue;
+            }
+            let close = chars.len() - n;
+            // "**" is not an italic "*" closing.
+            if n == 1 && close > 0 && chars[close - 1] == d[0] {
+                continue;
+            }
+            let Some(open) = (0..close.saturating_sub(n)).rev().find(|&i| {
+                chars[i..i + n] == d[..]
+                    && (n > 1 || ((i == 0 || chars[i - 1] != d[0]) && chars[i + 1] != d[0]))
+                    && (i == 0 || !chars[i - 1].is_alphanumeric() || d[0] != '_')
+            }) else {
+                continue;
+            };
+            let inner = &chars[open + n..close];
+            if inner.is_empty()
+                || inner[0].is_whitespace()
+                || inner[inner.len() - 1].is_whitespace()
+            {
+                continue;
+            }
+            let line = &mut self.lines[li];
+            line.chars.drain(close..close + n);
+            line.chars.drain(open..open + n);
+            for ch in &mut line.chars[open..close - n] {
+                *flag(&mut ch.style) = true;
+            }
+            self.cursor.col = col - 2 * n;
+            self.anchor = self.cursor;
+            // Keep typing in plain text after the closing mark.
+            let mut st = line
+                .chars
+                .get(self.cursor.col.saturating_sub(1))
+                .map(|c| c.style)
+                .unwrap_or_default();
+            *flag(&mut st) = false;
+            self.pending = Some(st);
+            line.orig = 0..0;
+            return;
         }
     }
 
@@ -801,6 +865,22 @@ mod tests {
     }
 
     #[test]
+    fn markdown_habits_format_while_typing() {
+        let mut e = editor("## Note\n\nx\n", "note");
+        e.set_cursor(Pos { line: 1, col: 1 }, false);
+        e.insert_text(" a **bold** and *it* and `code` then");
+        let md = skiss_core::board::inline::to_markdown(&e.body_lines()[0].spans);
+        assert_eq!(md, "x a **bold** and *it* and `code` then");
+        assert!(e.lines[1].chars.iter().any(|c| c.style.bold));
+        assert!(!e.lines[1].chars.last().unwrap().style.bold);
+        // snake_case and 2*3*4 stay as typed.
+        let mut e = editor("## Note\n\nx\n", "note");
+        e.set_cursor(Pos { line: 1, col: 1 }, false);
+        e.insert_text(" snake_case_name");
+        assert!(e.lines[1].chars.iter().all(|c| !c.style.italic));
+    }
+
+    #[test]
     fn enter_in_a_task_list_adds_a_task() {
         let mut e = editor("## Todo\n\n- [ ] one\n", "todo");
         e.set_cursor(Pos { line: 1, col: 3 }, false);
@@ -899,5 +979,46 @@ mod repro {
             }
         }
         assert_eq!(src, "## Erik\n\nTech lead. Loves Rust.\n");
+    }
+}
+
+#[cfg(test)]
+mod repro_tasks {
+    use super::*;
+    use skiss_core::board::{Board, edit};
+
+    fn type_saving(src: &mut String, e: &mut Editor, text: &str) {
+        for c in text.chars() {
+            if c == '\n' {
+                e.newline();
+            } else {
+                e.insert_text(&c.to_string());
+            }
+            let b = Board::parse(src);
+            if let Some(out) =
+                edit::set_card_text(&b, src, "agenda", e.title().as_deref(), &e.body_lines())
+            {
+                *src = out.source;
+                let nb = Board::parse(src);
+                e.refresh_origins(nb.card("agenda").unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn typing_a_task_list_per_keystroke() {
+        let mut src = "# T\n\n## Agenda\n".to_string();
+        let b = Board::parse(&src);
+        let mut e = Editor::new(b.card("agenda").unwrap());
+        e.set_cursor(Pos { line: 0, col: 6 }, false);
+        type_saving(
+            &mut src,
+            &mut e,
+            "\n[ ] Morning: where we are\nAfternoon: where we go",
+        );
+        assert_eq!(
+            src,
+            "# T\n\n## Agenda\n- [ ] Morning: where we are\n- [ ] Afternoon: where we go\n"
+        );
     }
 }
