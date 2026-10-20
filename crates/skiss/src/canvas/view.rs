@@ -3371,7 +3371,7 @@ impl BoardView {
                 }
             }
             for id in &ids {
-                for (other, _) in self.layout.nodes.iter() {
+                for other in self.layout.nodes.keys() {
                     if self.is_inside(other, id) {
                         set.insert(other.clone());
                     }
