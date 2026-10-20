@@ -114,6 +114,10 @@ pub struct BoardView {
     motion: Motion,
     camera: Camera,
     camera_ready: bool,
+    /// Frame the board once more after the first paint, arrows included.
+    refit: bool,
+    /// Where the arrows went in the last paint (world units).
+    ink: Rect,
     selection: Vec<String>,
     hover: Option<String>,
     drag: Drag,
@@ -173,7 +177,8 @@ struct Search {
 
 /// Arrow sides chosen for a connection: the two card rects and the layout they were chosen
 /// for, and the sides.
-type Route = (Rect, Rect, u64, (u8, u8));
+/// A remembered arrow route: both cards' rects, the layout revision, the sides and the bend.
+type Route = (Rect, Rect, u64, (u8, u8), f32);
 
 /// A connection label to draw on top of the cards.
 type Label = (Rect, std::sync::Arc<egui::Galley>, Color32);
@@ -192,6 +197,8 @@ impl BoardView {
             motion: Motion::new(),
             camera: Camera::new(Pos2::ZERO, 1.0),
             camera_ready: false,
+            refit: false,
+            ink: Rect::NOTHING,
             selection: Vec::new(),
             hover: None,
             drag: Drag::None,
@@ -306,6 +313,7 @@ impl BoardView {
             self.camera = Camera::new(c, z * 0.92);
             self.camera.fly_to(screen, target, 70.0, 1.15);
             self.camera_ready = true;
+            self.refit = true;
         }
 
         // Pointer input that moves the camera.
@@ -342,6 +350,13 @@ impl BoardView {
         // Paint, collecting clickable spots.
         let painter = ui.painter_at(screen);
         self.paint(&ctx, &painter, screen, theme, now);
+        // An arrow that arcs outside the cards still belongs in the opening view.
+        if std::mem::take(&mut self.refit) && self.ink != Rect::NOTHING {
+            let all = self.layout.bounds.union(self.ink);
+            if all != self.layout.bounds {
+                self.camera.fly_to(screen, all, 70.0, 1.15);
+            }
+        }
 
         if let Some(at) = self.pending_caret.take()
             && let Some(pos) = self.editor_pos_at(at)
@@ -478,28 +493,34 @@ impl BoardView {
         let images = &self.images;
         let board = &self.doc.board;
         let area_h = theme.area_size * 1.7 * self.text_scale;
-        let title_h = theme.board_title_size * 1.2;
         let layout = ctx.fonts_mut(|fonts| {
-            let mut measure = |card: &Card, width: f32| -> f32 {
+            let mut measure = |card: &Card, width: f32| -> (f32, f32) {
                 let mut aspect = |url: &str| images.peek_aspect(&dir, url);
-                let (title, lines): (Option<Vec<Span>>, &[Line]) = match &editing {
-                    Some((id, t, lines)) if *id == card.id => (t.clone(), lines),
-                    _ => (
-                        card.heading.as_ref().map(|h| title_spans(&h.spans)),
-                        &card.lines,
-                    ),
+                let saved = card.heading.as_ref().map(|h| title_spans(&h.spans));
+                let mut height = |title: Option<&[Span]>, lines: &[Line]| {
+                    let t = content::layout(fonts, &st, title, lines, width, &mut aspect);
+                    t.size.y.max(theme.body_size * self.text_scale)
                 };
-                let t = content::layout(fonts, &st, title.as_deref(), lines, width, &mut aspect);
-                let full = t.size.y.max(theme.body_size * self.text_scale);
                 // Long cards rest collapsed and unfold when selected or edited.
                 let max = COLLAPSED_HEIGHT * self.text_scale;
-                if full > max * 1.15 && !expanded.contains(&card.id) {
-                    max
-                } else {
-                    full
-                }
+                let collapse = |full: f32| if full > max * 1.15 { max } else { full };
+                let saved_h = height(saved.as_deref(), &card.lines);
+                let shown = match &editing {
+                    Some((id, t, lines)) if *id == card.id => height(t.as_deref(), lines),
+                    _ if expanded.contains(&card.id) => saved_h,
+                    _ => collapse(saved_h),
+                };
+                (shown, collapse(saved_h))
             };
-            layout::compute(board, &mut measure, area_h, title_h, theme.tilt)
+            let aspect = |url: &str| images.peek_aspect(&dir, url);
+            layout::compute(
+                board,
+                &mut measure,
+                &aspect,
+                area_h,
+                theme.board_title_size,
+                theme.tilt,
+            )
         });
         self.layout = layout;
     }
@@ -544,7 +565,7 @@ impl BoardView {
 
         // Board title.
         if let (Some(t), Some(pos)) = (&self.doc.board.title, self.layout.title_pos) {
-            let size = theme.board_title_size * zoom;
+            let size = self.layout.title_size * zoom;
             self.title_rect = None;
             if size > 4.0 {
                 let g = p.layout_no_wrap(
@@ -635,7 +656,7 @@ impl BoardView {
                 if sr.width() < 30.0 || !screen.intersects(sr) {
                     continue;
                 }
-                let fade = ((0.45 - zoom) / 0.2).clamp(0.0, 1.0);
+                let fade = map_fade(zoom);
                 let depth = self.layout.get(id).map_or(0, |n| n.depth);
                 let base = if depth == 0 { 22.0 } else { 15.0 };
                 let size = (theme.area_size * 1.6 * zoom)
@@ -654,7 +675,7 @@ impl BoardView {
                 drawn_labels.push(label_rect);
                 let bg = Rect::from_min_size(pos, g.size()).expand2(vec2(10.0, 5.0));
                 p.rect_filled(bg, 8.0, theme.bg.gamma_multiply(0.85 * fade));
-                p.galley(pos, g, theme.text);
+                p.galley(pos, g, theme.text.gamma_multiply(fade));
             }
         }
 
@@ -735,7 +756,9 @@ impl BoardView {
         // Title band.
         if let Some(h) = &area.heading {
             let size = theme.area_size * zoom * self.text_scale;
-            if size >= 5.0 && zoom >= 0.3 {
+            // Zoomed out, the map labels take over (one name per area, never two).
+            let shown_alpha = 1.0 - map_fade(zoom);
+            if size >= 5.0 && shown_alpha > 0.0 {
                 let pad = layout::AREA_PAD * zoom;
                 let mut text = h.text.clone();
                 if text.is_empty() {
@@ -751,7 +774,8 @@ impl BoardView {
                     theme.muted
                 } else {
                     theme.area_title
-                };
+                }
+                .gamma_multiply(shown_alpha);
                 let g = p.layout(shown, font, col, (sr.width() - pad * 2.0).max(10.0));
                 let pos = sr.min + vec2(pad, pad * 0.55);
                 let hidden = matches!(&self.prompt, Some(Prompt { kind: PromptKind::AreaTitle { id: pid, .. }, .. }) if pid == id);
@@ -837,6 +861,7 @@ impl BoardView {
             a: Rect,
             b: Rect,
             sides: (u8, u8),
+            bend: f32,
             fracs: (f32, f32),
         }
         let mut cs: Vec<C> = Vec::new();
@@ -865,21 +890,22 @@ impl BoardView {
                 self.motion.rect(&to).unwrap_or(Rect::NOTHING),
             );
             let key = (from.clone(), to.clone());
-            let sides = match self.route_cache.get(&key) {
-                Some((ra, rb, rev, sides))
+            let (sides, bend) = match self.route_cache.get(&key) {
+                Some((ra, rb, rev, sides, bend))
                     if *rev == self.layout_key.0
                         && (ra.min - wa.min).length() < 0.5
                         && (rb.min - wb.min).length() < 0.5
                         && (ra.size() - wa.size()).length() < 0.5
                         && (rb.size() - wb.size()).length() < 0.5 =>
                 {
-                    *sides
+                    (*sides, *bend)
                 }
                 _ => {
-                    let sides = best_sides(a, b, &obstacles, &from, &to);
+                    let frame = cam.rect_to_screen(screen, self.layout.bounds);
+                    let (sides, bend) = best_route(a, b, &obstacles, frame, &from, &to);
                     self.route_cache
-                        .insert(key, (wa, wb, self.layout_key.0, sides));
-                    sides
+                        .insert(key, (wa, wb, self.layout_key.0, sides, bend));
+                    (sides, bend)
                 }
             };
             cs.push(C {
@@ -890,6 +916,7 @@ impl BoardView {
                 a,
                 b,
                 sides,
+                bend,
                 fracs: (0.5, 0.5),
             });
         }
@@ -934,6 +961,7 @@ impl BoardView {
             .collect();
         let mut placed: Vec<Rect> = Vec::new();
         self.conn_paths.clear();
+        self.ink = Rect::NOTHING;
         for c in cs {
             let C {
                 from,
@@ -943,6 +971,7 @@ impl BoardView {
                 a,
                 b,
                 sides,
+                bend,
                 fracs,
             } = c;
             if !screen.intersects(a.union(b)) {
@@ -969,40 +998,11 @@ impl BoardView {
             let stroke = Stroke::new(width, color);
             let (p0, n0) = draw::port(a, sides.0, fracs.0);
             let (p3, n3) = draw::port(b, sides.1, fracs.1);
-            let (pts, mid, dir) = {
-                let others: Vec<Rect> = obstacles
-                    .iter()
-                    .filter(|(id, _)| {
-                        *id != from
-                            && *id != to
-                            && !self.is_inside(&from, id)
-                            && !self.is_inside(&to, id)
-                    })
-                    .map(|(_, r)| *r)
-                    .collect();
-                let plain = draw::curve(p0, n0, p3, n3);
-                if draw::crossings(&plain.0, &others) == 0 {
-                    plain
-                } else {
-                    // Swing wider when the plain bend still cuts through a card.
-                    // Only if it clearly helps, and without wandering far.
-                    let base =
-                        draw::crossings(&plain.0, &others) as f32 * 45.0 + draw::length(&plain.0);
-                    [1.5, 2.0]
-                        .into_iter()
-                        .map(|k| draw::curve_with(p0, n0, p3, n3, k))
-                        .map(|c| {
-                            (
-                                draw::crossings(&c.0, &others) as f32 * 45.0 + draw::length(&c.0),
-                                c,
-                            )
-                        })
-                        .filter(|(sc, _)| *sc < base * 0.85)
-                        .min_by(|a, b| a.0.total_cmp(&b.0))
-                        .map(|(_, c)| c)
-                        .unwrap_or(plain)
-                }
-            };
+            let (pts, mid, dir) = draw::curve_with(p0, n0, p3, n3, bend);
+            for q in &pts {
+                let w = cam.to_world(screen, *q);
+                self.ink = self.ink.union(Rect::from_min_max(w, w));
+            }
             self.conn_paths
                 .push((from.clone(), to.clone(), pts.clone(), mid));
             draw::pencil_line(p, &pts, stroke, theme, &format!("{from}>{to}"), zoom);
@@ -1284,16 +1284,35 @@ impl BoardView {
                             }
                         }
                         RowKind::Table => {
-                            let r = Rect::from_min_size(pos, row.size * k).intersect(clip);
-                            if r.is_positive() {
-                                p.add(
-                                    egui::epaint::RectShape::filled(
-                                        r,
-                                        2.0,
-                                        bar.gamma_multiply(0.6),
-                                    )
-                                    .with_angle_and_pivot(angle, center),
-                                );
+                            // A grid of short bars, with the row rules: still reads as a table.
+                            for (g, off) in &row.cells {
+                                for prow in &g.rows {
+                                    let w = prow.rect().width() * k;
+                                    let h = (prow.rect().height() * k * 0.55).max(1.0);
+                                    let at = pos
+                                        + vec2(
+                                            off.x * k,
+                                            (off.y + prow.pos.y + prow.rect().height() * 0.25) * k,
+                                        );
+                                    let r = Rect::from_min_size(at, vec2(w, h)).intersect(clip);
+                                    if r.is_positive() && w > 1.0 {
+                                        p.add(
+                                            egui::epaint::RectShape::filled(r, h / 2.0, bar)
+                                                .with_angle_and_pivot(angle, center),
+                                        );
+                                    }
+                                }
+                            }
+                            for y in row.rules.iter().take(1) {
+                                let a = pos + vec2(0.0, y * k);
+                                let r = Rect::from_min_size(a, vec2(row.size.x * k, 1.0))
+                                    .intersect(clip);
+                                if r.is_positive() {
+                                    p.add(
+                                        egui::epaint::RectShape::filled(r, 0.0, bar)
+                                            .with_angle_and_pivot(angle, center),
+                                    );
+                                }
                             }
                         }
                         _ => {
@@ -4929,7 +4948,14 @@ impl PromptColors {
 
 /// Picks which sides of two cards an arrow leaves and enters: the pair whose curve crosses the
 /// fewest other cards, then the shortest.
-fn best_sides(a: Rect, b: Rect, obstacles: &[(String, Rect)], from: &str, to: &str) -> (u8, u8) {
+fn best_route(
+    a: Rect,
+    b: Rect,
+    obstacles: &[(String, Rect)],
+    frame: Rect,
+    from: &str,
+    to: &str,
+) -> ((u8, u8), f32) {
     let natural = (draw::side_of(a, b.center()), draw::side_of(b, a.center()));
     let others: Vec<Rect> = obstacles
         .iter()
@@ -4937,25 +4963,41 @@ fn best_sides(a: Rect, b: Rect, obstacles: &[(String, Rect)], from: &str, to: &s
         .map(|(_, r)| *r)
         .filter(|r| r.intersects(a.union(b).expand(220.0)))
         .collect();
-    let score = |sa: u8, sb: u8| -> f32 {
+    let unit = (a.width() + b.width()) * 0.5;
+    // Swinging out past the edge of the board looks lost, and is cut off when it all fits.
+    let frame = frame.expand(unit * 0.3);
+    let score = |sa: u8, sb: u8, bend: f32| -> f32 {
         let (p0, n0) = draw::port(a, sa, 0.5);
         let (p3, n3) = draw::port(b, sb, 0.5);
-        let (pts, _, _) = draw::curve(p0, n0, p3, n3);
+        let (pts, _, _) = draw::curve_with(p0, n0, p3, n3, bend);
         // Running back through its own cards counts as crossing too.
         let own = [a.shrink(6.0), b.shrink(6.0)];
-        let hits = draw::crossings(&pts, &others) + draw::crossings(&pts, &own);
-        // A short line that slips under a card beats a long loop around the board.
-        hits as f32 * 45.0 + draw::length(&pts)
+        // Leaving a card on the side that faces away from the other end makes a loop.
+        let away = |p: Pos2, n: Vec2, target: Pos2| (target - p).dot(n) < -unit * 0.25;
+        let loops = away(p0, n0, p3) as u8 + away(p3, n3, p0) as u8;
+        draw::route_score(&pts, &others, unit)
+            + draw::crossings(&pts, &own) as f32 * unit * 0.3
+            + loops as f32 * unit * 2.5
+            + pts.iter().filter(|p| !frame.contains(**p)).count() as f32 * unit * 0.1
     };
-    let natural_score = score(natural.0, natural.1);
-    let mut best = (natural, natural_score);
+    let mut best = ((natural, 1.0), score(natural.0, natural.1, 1.0));
+    // Every pair of sides, each with a plain and two wider bends: the line that passes under
+    // no card, without a long detour, wins.
     for sa in 0..4u8 {
         for sb in 0..4u8 {
-            let sc = score(sa, sb);
-            if sc < best.1 {
-                best = ((sa, sb), sc);
+            for bend in [1.0, 1.6] {
+                let sc = score(sa, sb, bend);
+                if sc < best.1 - 0.5 {
+                    best = (((sa, sb), bend), sc);
+                }
             }
         }
     }
     best.0
+}
+
+/// Whether the map labels have taken over from the area titles (1 far out, 0 near). It is a
+/// clean switch, so an area never shows its name twice.
+fn map_fade(zoom: f32) -> f32 {
+    if zoom < 0.45 { 1.0 } else { 0.0 }
 }

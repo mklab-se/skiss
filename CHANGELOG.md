@@ -40,6 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Arrows route around cards instead of under them.
 - Hard line breaks (for poems and addresses): ⇧Enter inserts one, saved as a trailing `\`.
 - A board opens zoomed out to show all of it at once; zoom in from there.
+- Boards look good as they open. The layout packs cards like a masonry wall and picks the shape
+  that fills the window. The board title grows with the board. Square and portrait pictures get
+  narrower cards, and long prose gets a reading-width column. Tables stay tables when zoomed
+  out. Area names show once at any zoom.
+- Arrows avoid passing under cards (so they never seem to point at the wrong one), avoid loops,
+  and stay inside the board. The opening view includes them.
+- Opening a long card, or typing in one, only nudges the cards it covers; the rest of the board
+  stays put.
 - Resizing cards and areas from a corner grip; pasting copied cards between boards keeps them
   cards.
 

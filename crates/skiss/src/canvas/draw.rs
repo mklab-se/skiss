@@ -170,11 +170,7 @@ pub fn port(r: Rect, side: u8, frac: f32) -> (Pos2, Vec2) {
 }
 
 /// A curve between two ports. Returns the points, the label anchor and the end direction.
-pub fn curve(p0: Pos2, n0: Vec2, p3: Pos2, n3: Vec2) -> (Vec<Pos2>, Pos2, Vec2) {
-    curve_with(p0, n0, p3, n3, 1.0)
-}
-
-/// Like [`curve`], with the bend scaled by `bend` (bigger swings wider around obstacles).
+/// The bend is scaled by `bend` (bigger swings wider around obstacles).
 pub fn curve_with(p0: Pos2, n0: Vec2, p3: Pos2, n3: Vec2, bend: f32) -> (Vec<Pos2>, Pos2, Vec2) {
     let dist = (p3 - p0).length();
     let k = (dist * 0.4).clamp(20.0, 220.0) * bend;
@@ -255,6 +251,23 @@ pub fn crossings(pts: &[Pos2], obstacles: &[Rect]) -> usize {
         .step_by(2)
         .filter(|p| obstacles.iter().any(|r| r.contains(**p)))
         .count()
+}
+
+/// How many of `obstacles` a polyline passes through.
+pub fn cards_crossed(pts: &[Pos2], obstacles: &[Rect]) -> usize {
+    obstacles
+        .iter()
+        .filter(|r| pts.iter().step_by(2).any(|p| r.contains(*p)))
+        .count()
+}
+
+/// How good a route is (lower is better), in the same units as the points: its length, plus a
+/// price for every card it slips under and for how far it runs beneath them. `unit` is a typical
+/// card size, so the choice is the same at any zoom.
+pub fn route_score(pts: &[Pos2], obstacles: &[Rect], unit: f32) -> f32 {
+    length(pts)
+        + cards_crossed(pts, obstacles) as f32 * unit * 3.0
+        + crossings(pts, obstacles) as f32 * unit * 0.05
 }
 
 /// The length of a polyline.
