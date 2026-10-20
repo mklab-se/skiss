@@ -16,105 +16,169 @@
   <a href="CHANGELOG.md"><strong>What's new</strong></a>
 </p>
 
-# skiss
+<h3 align="center">A whiteboard for your thinking. A Markdown file on your disk.</h3>
 
-**skiss** (Swedish for "sketch") is an infinite canvas for your notes, stored as plain Markdown.
-Think Miro or a whiteboard, but the board is a `.md` file on your own machine: you can read it in
-any editor, diff it in Git, and hand it to a client.
+<p align="center">
+<img src="https://raw.githubusercontent.com/mklab-se/skiss/main/media/screenshots/studio.jpg" alt="A painter's notebook in skiss: areas for ideas, works, poems, materials and shows, with photos of paintings, checklists and a few arrows">
+</p>
+
+**skiss** (Swedish for "sketch") turns any Markdown file into an infinite canvas you can see,
+arrange and connect, like Miro or a whiteboard. The difference: there is no account, no cloud and
+no export. The board *is* your `.md` file. Open it in any editor, diff it in Git, send it to a
+colleague, and it reads like ordinary notes.
 
 ```sh
-skiss notes.md          # open (or create) a board; the prompt comes right back
-skiss                   # start screen: name a file, pick a folder, or open one
-skiss notes.md --theme ember
-skiss notes.md --wait   # stay attached until the window closes
+skiss notes.md
 ```
 
-Esc twice closes the window (everything is already saved).
+That's it: the window opens, the board appears, and your terminal is free again. Everything you do
+is saved to the file as you go.
 
-Try the demo board: `skiss examples/apollo.md`.
+## Why skiss
 
-## Your Markdown is the board
+- **Your notes stay yours.** Plain Markdown in a folder you own, readable in 50 years. skiss adds
+  nothing you can't read without it.
+- **See the shape of your thinking.** Headings become cards and areas, lists become checklists,
+  links become arrows. A file you have been growing for months suddenly has a map.
+- **Write like you talk.** An arrow is just a sentence: `- Reports to [Amara Okafor](#amara-okafor)`.
+  Anyone reading the file understands it; skiss draws it.
+- **Git loves it.** skiss changes only the bytes you changed. Tick a box and the diff is one
+  character. Your hand-written files survive being opened.
+- **Beautiful and calm.** Smooth, springy animation when something moves, complete stillness when
+  nothing does, and two themes: a warm paper sketchbook and a dark, glowing Ember.
+- **Fast and native.** One binary, written in Rust, for macOS, Linux and Windows. No browser,
+  no Electron.
 
-skiss never shows Markdown syntax and never needs its own. The structure you already write becomes
-the board:
+## See it in action
 
-| In the file | On the board |
-| --- | --- |
-| `# Title` (the only H1, first) | the board title |
-| a heading with sub-headings | an **area** (a frame), nested as deep as you like |
-| a heading without sub-headings | a **card**: the heading is its title, the text below its body |
-| paragraphs, quotes, code, tables, images | one card each |
-| a bullet list | one card per item, nested items as cards inside |
-| a task list (`- [ ]`) | a checklist card with real checkboxes |
+### A notebook that grew for two years
 
-**Connections are sentences.** A list line with a link to another card's heading is drawn as an
-arrow, labeled with the words in front of the link:
+The painter's notebook above holds ideas, poems, finished paintings, suppliers, shows and a journal.
+Zoomed out it is a map; zoom in and every card is there in full, photos included.
+
+<p align="center">
+<img src="https://raw.githubusercontent.com/mklab-se/skiss/main/media/screenshots/studio-closeup.jpg" alt="A close-up of the Works area: cards with photos of abstract paintings, sizes and notes, arrows from the ideas they came from">
+</p>
+
+### An org chart that draws itself
+
+Write who reports to whom as sentences, and skiss recognizes the hierarchy and lays it out as a tree.
+No diagram tool, no boxes to drag: add a person and the chart rearranges.
+
+<p align="center">
+<img src="https://raw.githubusercontent.com/mklab-se/skiss/main/media/screenshots/orgchart.jpg" alt="An org chart of a fictional company with portraits: the CEO at the top, the CTO below, and four teams arranged as trees">
+</p>
 
 ```markdown
-### Anna Berg
-Program sponsor.
-- Manages [Erik Lund](#erik-lund) and [Sara Ek](#sara-ek)
-- Told me to contact [Johan Holm](#johan-holm), 2026-10-14
+### Mei Lin Chen
+![Portrait of Mei Lin Chen](orgchart.assets/mei-lin-chen.jpg)
+
+**Engineering Manager**. Runs planning, hiring and the weekly demo.
+- Reports to [Lukas Brandt](#lukas-brandt)
 ```
 
-Anyone reading the file sees ordinary notes. skiss sees who manages whom, who told you to contact
-whom, and when. Drawing an arrow in skiss writes exactly that kind of sentence.
+### Long writing reads like a book
 
-**Small diffs.** skiss rewrites only the bytes that changed: renaming a card changes one line,
-ticking a box changes one character, a new arrow adds one line. Hand-written files survive being
-opened and edited. Positions you set by dragging, and card colors, go into one HTML comment at the
-end of the file (invisible in every Markdown viewer), one line per decorated card:
+A card full of prose flows into columns at a comfortable line length, so a two-page chapter is a
+spread you can read, not a narrow scroll. Nothing is ever cut off or hidden behind a click.
 
-```markdown
-<!-- skiss
-Johan Holm: at 220, 120; blue
-Colors: red means Blocked
--->
-```
+<p align="center">
+<img src="https://raw.githubusercontent.com/mklab-se/skiss/main/media/screenshots/stockholm-closeup.jpg" alt="A chapter about the history of Stockholm laid out in three columns of handwritten text">
+</p>
 
-Pasted images are saved next to the file in `notes.assets/`.
+### A project board with structure
 
-## Working on the canvas
+The Apollo program as a working board: people and centers, the Saturn V, test flights, risks with
+colors that mean something, and the decisions that connect it all.
 
-- **Autosave.** There is no save button. Changes are written a moment after you make them; if the
-  file changes on disk (Git, another editor, a sync tool), the board animates to the new state.
-- **Edit in place.** Double-click a card (or press Enter) and type. ⌘B, ⌘I, ⌘E, copy, paste,
-  select all, undo and redo work as in any editor, and so do Markdown habits: typing `**bold**`
-  turns bold. Enter in a task list adds a task; `[ ]` at the start of a line makes one.
-- **Add and arrange.** The dock at the bottom has **+ Card**, **+ Area**, **Group** and **Tidy
-  up**. Double-click empty space for a new card, Tab for the next one, drag cards to move them
-  (into another area too; nothing else moves), ⌘G to group selected cards into a new area, 1 to 7
-  for paper colors. Tidy up (⌘⇧L) lays the board out afresh.
-- **Connect.** Drag from a card's border (or one of its dots) to another card, and say how they are
-  connected. Click a line or its label to select it, double-click to rename it, Delete removes it.
-- **Rename.** Double-click a card to edit it, an area's title or the board title to rename them.
-- **Resize.** Drag the corner grip of a selected card or area; double-click the grip for automatic
-  size again.
-- **Find.** ⌘F searches the board: hits light up, Enter flies to the next one, and color chips
-  (with their names, such as Blocked) filter by color. R shows everything about the selected card:
-  its arrows both ways and every card that links to it or mentions it.
-- **Copy and paste.** ⌘C copies the selected cards as Markdown; paste them into any board and they
-  arrive as cards again, fitted to the area you paste into.
-- **AI help.** A on a selected card (or AI in its toolbar) fixes spelling, makes text clearer or
-  shorter, translates, or draws a picture from the card, using your own models through
-  [Ailloy](https://crates.io/crates/ailloy) (`skiss ai config` to set them up). Every change is one
-  undo step; pictures keep their prompt as alt text and can be redrawn.
-- **Zoom.** Pinch, ⌘-scroll or a mouse wheel zooms, without limits. Far out, cards turn into a map
-  of titles; close in, everything is readable. F fits everything. ⌘⇧+ makes text and lines bigger
-  for sharing your screen.
-- **Two looks.** Sketchbook (paper, handwriting) and Ember (MKLab's dark theme). ⌘T switches;
-  skiss remembers your choice.
+<p align="center">
+<img src="https://raw.githubusercontent.com/mklab-se/skiss/main/media/screenshots/apollo.jpg" alt="A board about the Apollo program with areas for people, the Saturn V, spacecraft, the test program, Apollo 11 and risks">
+</p>
 
-Press **?** in skiss for every shortcut.
+### Two moods
 
-## Install
+Sketchbook for paper and handwriting, Ember for a dark room. ⌘T switches.
 
-See [INSTALL.md](INSTALL.md) for Homebrew, `cargo install`, `cargo binstall`, and from-source
-instructions. The short version:
+<p align="center">
+<img src="https://raw.githubusercontent.com/mklab-se/skiss/main/media/screenshots/ember.jpg" alt="The painter's notebook in the dark Ember theme">
+</p>
+
+## Get started
+
+**1. Install** (macOS and Linux):
 
 ```sh
 brew install mklab-se/tap/skiss
 ```
+
+Or with Rust: `cargo install skiss` (or `cargo binstall skiss` for a prebuilt binary). Windows,
+prebuilt downloads and SBOMs are in [INSTALL.md](INSTALL.md).
+
+**2. Open the samples.** Clone the repository and open any of them:
+
+```sh
+git clone https://github.com/mklab-se/skiss && cd skiss
+skiss examples/studio.md       # a painter's notebook, two years of it
+skiss examples/orgchart.md     # an org chart that lays itself out
+skiss examples/apollo.md       # a project board
+skiss examples/stockholm.md    # long writing in a few big cards
+```
+
+**3. Make your own.** Point skiss at any Markdown file, new or old:
+
+```sh
+skiss ideas.md        # a new file is created; an existing one opens as a board
+skiss                 # a start screen to name a file or pick a folder
+```
+
+Double-click anywhere to add a card, drag cards around, drag from a card's edge to another card to
+connect them. Press **?** for every shortcut. Press Esc twice to close; everything is already saved.
+
+## How your Markdown becomes a board
+
+skiss never shows Markdown syntax, and never needs its own. The structure you already write is the
+board:
+
+| In the file | On the board |
+| --- | --- |
+| `# Title` (the first and only H1) | the board title |
+| a heading with sub-headings | an **area**, a frame around its cards, nested as deep as you like |
+| a heading without sub-headings | a **card**: the heading is its title, the text below its body |
+| paragraphs, quotes, code, tables, images | one card each |
+| a bullet list | one card per item, nested items as cards inside |
+| a task list (`- [ ]`) | a checklist card with real checkboxes |
+| `- Manages [Erik Lund](#erik-lund)` | an **arrow** labeled "manages" |
+
+Positions you set by dragging, and card colors, are kept in one HTML comment at the end of the file.
+It is invisible in every Markdown viewer and easy to read:
+
+```markdown
+<!-- skiss
+Johan Holm: at 220, 120; blue
+Colors: red means Blocked, green means Done
+-->
+```
+
+Pasted and generated pictures are saved next to the file, in `notes.assets/`.
+
+## Everything it does
+
+- **Autosave and live reload.** No save button. If the file changes on disk (Git, another editor, a
+  sync tool), the board animates to the new state.
+- **Edit in place.** Bold, italic, code, links, tasks, line breaks, undo and redo, and your Markdown
+  habits: typing `**bold**` turns bold.
+- **Arrange.** Add cards and areas, drag cards between areas, group a selection (⌘G), resize, pick
+  paper colors and give them meanings. Tidy up lays everything out afresh.
+- **Layout that thinks.** Boards open fitted to the window. Cards pack tightly, pictures get the
+  right shape, hierarchies become trees, and arrows find their way around cards.
+- **Find.** ⌘F searches the whole board and filters by color. R shows everything about a card: its
+  arrows both ways and every card that mentions it.
+- **Copy between boards.** Selected cards copy as Markdown and paste into any board as cards again.
+- **AI help, with your own models.** Fix spelling, make text clearer or shorter, translate, or draw
+  a picture from a card, through [Ailloy](https://crates.io/crates/ailloy) and the providers you
+  already use (`skiss ai config`). Every change is one undo step.
+- **Present it.** Infinite zoom with a readable map when zoomed out, and ⌘⇧+ for bigger text and
+  lines when you share your screen.
 
 ## Development
 
