@@ -74,7 +74,8 @@ pub fn run(path: Option<PathBuf>, theme: Option<String>) -> anyhow::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title(title)
             .with_inner_size([1360.0, 860.0])
-            .with_min_inner_size([520.0, 360.0]),
+            .with_min_inner_size([520.0, 360.0])
+            .with_icon(app_icon()),
         ..Default::default()
     };
     eframe::run_native(
@@ -83,4 +84,11 @@ pub fn run(path: Option<PathBuf>, theme: Option<String>) -> anyhow::Result<()> {
         Box::new(move |cc| Ok(Box::new(app::SkissApp::new(cc, path, theme)))),
     )
     .map_err(|e| anyhow::anyhow!("could not open the window: {e}"))
+}
+
+/// The app icon (Dock, taskbar and window): a robot hand writing with a quill, in pencil.
+fn app_icon() -> std::sync::Arc<egui::IconData> {
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon.png"))
+        .unwrap_or_default();
+    std::sync::Arc::new(icon)
 }

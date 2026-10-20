@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   date order). Start a jot with `/` to have AI write it, with the whole board as context
   (`/summarize this board in two paragraphs`), or `/picture` to draw one. Without AI, notes go
   to an Inbox area. The dock has a + Note button.
+- An app icon in the style of the README art: a robot hand writing with a quill, in pencil on
+  parchment. It shows in the macOS Dock, the Windows taskbar and Linux window lists.
 
 ## [0.1.0] - 2026-10-20
 
