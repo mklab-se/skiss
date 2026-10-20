@@ -84,18 +84,17 @@ fn parse_mods(s: &str) -> (Modifiers, String) {
 fn parse_target(words: &[&str]) -> Option<(Target, usize)> {
     let first = words.first()?;
     if let Some(rest) = first.strip_prefix('@') {
-        let (id, offset, percent) = match rest.split_once(':') {
-            Some((id, off)) => {
-                let percent = off.starts_with('%');
-                let (x, y) = off.trim_start_matches('%').split_once(',')?;
-                (
-                    id.to_string(),
-                    Some((x.parse().ok()?, y.parse().ok()?)),
-                    percent,
-                )
-            }
-            None => (rest.to_string(), None, false),
-        };
+        // "@id:x,y" or "@id:%x,y"; ids may contain ':' themselves ("@dock:area").
+        let parsed = rest.rsplit_once(':').and_then(|(id, off)| {
+            let percent = off.starts_with('%');
+            let (x, y) = off.trim_start_matches('%').split_once(',')?;
+            Some((
+                id.to_string(),
+                Some((x.parse().ok()?, y.parse().ok()?)),
+                percent,
+            ))
+        });
+        let (id, offset, percent) = parsed.unwrap_or((rest.to_string(), None, false));
         return Some((
             Target::Node {
                 id,

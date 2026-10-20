@@ -13,6 +13,7 @@ use super::view::{BoardView, UiRequest};
 enum Screen {
     Start {
         name: String,
+        folder: PathBuf,
         error: Option<String>,
         focus: bool,
     },
@@ -48,6 +49,7 @@ impl SkissApp {
             theme,
             screen: Screen::Start {
                 name: String::new(),
+                folder: std::env::current_dir().unwrap_or_default(),
                 error: None,
                 focus: true,
             },
@@ -66,6 +68,7 @@ impl SkissApp {
         {
             app.screen = Screen::Start {
                 name: String::new(),
+                folder: std::env::current_dir().unwrap_or_default(),
                 error: Some(e.to_string()),
                 focus: true,
             };
@@ -94,7 +97,13 @@ impl SkissApp {
 
     fn start_screen(&mut self, ui: &mut Ui) -> Option<PathBuf> {
         let theme = self.theme.clone();
-        let Screen::Start { name, error, focus } = &mut self.screen else {
+        let Screen::Start {
+            name,
+            folder,
+            error,
+            focus,
+        } = &mut self.screen
+        else {
             return None;
         };
         let rect = ui.max_rect();
@@ -102,20 +111,41 @@ impl SkissApp {
         p.rect_filled(rect, 0.0, theme.bg);
         super::draw::grid(p, rect, egui::Pos2::ZERO, 1.0, &theme);
         p.text(
-            rect.center() - vec2(0.0, 205.0),
+            rect.center() - vec2(0.0, 225.0),
             Align2::CENTER_CENTER,
             "skiss",
             FontId::new(theme.board_title_size * 1.4, theme.title.clone()),
             theme.text,
         );
         p.text(
-            rect.center() - vec2(0.0, 142.0),
+            rect.center() - vec2(0.0, 162.0),
             Align2::CENTER_CENTER,
             "An infinite canvas for your notes, stored as Markdown",
             FontId::new(theme.body_size, theme.body.clone()),
             theme.muted,
         );
+        p.text(
+            rect.center_bottom() - vec2(0.0, 24.0),
+            Align2::CENTER_CENTER,
+            "Esc to quit",
+            FontId::proportional(12.5),
+            theme.muted,
+        );
         let mut chosen = None;
+        let field = |ui: &mut Ui, text: &mut String, hint: &str| {
+            ui.add(
+                egui::TextEdit::singleline(text)
+                    .hint_text(hint)
+                    .font(FontId::proportional(17.0))
+                    .text_color(theme.text)
+                    .background_color(if theme.dark {
+                        Color32::from_white_alpha(14)
+                    } else {
+                        Color32::WHITE
+                    })
+                    .desired_width(f32::INFINITY),
+            )
+        };
         egui::Area::new(egui::Id::unique("start"))
             .fixed_pos(rect.center() + vec2(0.0, 10.0))
             .pivot(Align2::CENTER_CENTER)
@@ -132,43 +162,79 @@ impl SkissApp {
                         color: Color32::from_black_alpha(40),
                     })
                     .show(ui, |ui| {
-                        ui.set_width(380.0);
+                        ui.set_width(420.0);
                         ui.label(
                             RichText::new("Name your skiss")
                                 .size(20.0)
                                 .color(theme.text),
                         );
                         ui.add_space(6.0);
-                        let r = ui.add(
-                            egui::TextEdit::singleline(name)
-                                .hint_text("project-notes")
-                                .font(FontId::proportional(18.0))
-                                .desired_width(f32::INFINITY),
-                        );
+                        let r = field(ui, name, "project-notes");
                         if *focus {
                             r.request_focus();
                             *focus = false;
                         }
-                        ui.add_space(6.0);
-                        let cwd = std::env::current_dir().unwrap_or_default();
-                        let file = file_name(name);
+                        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                        ui.add_space(10.0);
                         ui.label(
-                            RichText::new(format!("{}", cwd.join(&file).display()))
+                            RichText::new("In this folder")
+                                .size(13.0)
+                                .color(theme.muted),
+                        );
+                        ui.horizontal(|ui| {
+                            let mut text = folder.display().to_string();
+                            let w = ui.available_width() - 90.0;
+                            let resp = ui.add(
+                                egui::TextEdit::singleline(&mut text)
+                                    .font(FontId::proportional(13.0))
+                                    .text_color(theme.text)
+                                    .background_color(if theme.dark {
+                                        Color32::from_white_alpha(14)
+                                    } else {
+                                        Color32::WHITE
+                                    })
+                                    .desired_width(w),
+                            );
+                            if resp.changed() {
+                                *folder = PathBuf::from(text);
+                            }
+                            if ui.button("Choose…").clicked()
+                                && let Some(dir) =
+                                    rfd::FileDialog::new().set_directory(&*folder).pick_folder()
+                            {
+                                *folder = dir;
+                            }
+                        });
+                        let file = file_name(name);
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(format!("{}", folder.join(&file).display()))
                                 .size(12.0)
                                 .color(theme.muted),
                         );
                         if let Some(e) = error {
                             ui.label(RichText::new(e.as_str()).size(12.5).color(theme.accent));
                         }
-                        let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                        ui.add_space(8.0);
-                        let go = ui.add_enabled(
-                            !name.trim().is_empty(),
-                            egui::Button::new(RichText::new("Open").size(16.0)),
-                        );
-                        if (enter || go.clicked()) && !name.trim().is_empty() {
-                            chosen = Some(cwd.join(file));
-                        }
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            let go = ui.add_enabled(
+                                !name.trim().is_empty(),
+                                egui::Button::new(RichText::new("Create or open").size(15.0)),
+                            );
+                            if (enter || go.clicked()) && !name.trim().is_empty() {
+                                chosen = Some(folder.join(&file));
+                            }
+                            if ui
+                                .button(RichText::new("Open a file…").size(15.0))
+                                .clicked()
+                                && let Some(f) = rfd::FileDialog::new()
+                                    .set_directory(&*folder)
+                                    .add_filter("Markdown", &["md", "markdown", "txt"])
+                                    .pick_file()
+                            {
+                                chosen = Some(f);
+                            }
+                        });
                     });
             });
         chosen
@@ -243,6 +309,10 @@ impl eframe::App for SkissApp {
             && matches!(self.screen, Screen::Start { .. })
         {
             self.toggle_theme(&ctx);
+        }
+        if matches!(self.screen, Screen::Start { .. }) && ctx.input(|i| i.key_pressed(Key::Escape))
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         let theme = self.theme.clone();
         let mut open: Option<PathBuf> = None;

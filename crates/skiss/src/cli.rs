@@ -25,6 +25,10 @@ pub struct Cli {
     #[arg(long, value_name = "THEME")]
     pub theme: Option<String>,
 
+    /// Stay attached to the terminal until the window closes (default: return to the prompt)
+    #[arg(long)]
+    pub wait: bool,
+
     /// Increase output verbosity (-v for debug, -vv for trace)
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -100,7 +104,18 @@ impl Cli {
                 Ok(())
             }
             // No subcommand: open the canvas (with the start screen if no file was given).
-            None => tokio::task::block_in_place(|| crate::canvas::run(self.file, self.theme)),
+            None => {
+                crate::canvas::check(self.file.as_deref(), self.theme.as_deref())?;
+                // Give the prompt back: the window runs as its own process, like any app.
+                let attached = self.wait
+                    || std::env::var_os("SKISS_DETACHED").is_some()
+                    || std::env::var_os("SKISS_SCRIPT").is_some()
+                    || std::env::var_os("SKISS_SCREENSHOT").is_some();
+                if !attached {
+                    return crate::canvas::spawn_detached();
+                }
+                tokio::task::block_in_place(|| crate::canvas::run(self.file, self.theme))
+            }
         }
     }
 }

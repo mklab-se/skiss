@@ -70,6 +70,9 @@ struct Prompt {
 #[derive(Clone)]
 enum PromptKind {
     Label { from: String, to: String },
+    Relabel { from: String, to: String },
+    BoardTitle,
+    NewArea { parent: String },
     AreaTitle { id: String, start: usize },
     ColorName { color: Color },
 }
@@ -106,6 +109,16 @@ pub struct BoardView {
     pending_caret: Option<Pos2>,
     /// Until when scrolling belongs to a mouse-wheel zoom.
     wheel_until: f64,
+    /// When Esc was last pressed with nothing to cancel (Esc twice quits).
+    esc_at: f64,
+    /// Connection curves on screen (for clicking a line), with their label anchor.
+    conn_paths: Vec<(String, String, Vec<Pos2>, Pos2)>,
+    /// The connection under the pointer.
+    hover_conn: Option<(String, String)>,
+    /// The board title on screen (double-click to rename).
+    title_rect: Option<Rect>,
+    /// Dock buttons on screen (for scripted tests).
+    dock_buttons: Vec<(String, Rect)>,
 }
 
 /// A connection label to draw on top of the cards.
@@ -145,11 +158,34 @@ impl BoardView {
             reveal_pending: false,
             pending_caret: None,
             wheel_until: 0.0,
+            esc_at: -10.0,
+            conn_paths: Vec::new(),
+            hover_conn: None,
+            title_rect: None,
+            dock_buttons: Vec::new(),
         }
     }
 
     /// Where a node is on screen (points), as of the last frame.
     pub fn screen_rect(&self, id: &str) -> Option<Rect> {
+        if id == "title" {
+            return self.title_rect;
+        }
+        if let Some(rest) = id.strip_prefix("conn:") {
+            let (f, t) = rest.split_once('>')?;
+            return self
+                .conn_paths
+                .iter()
+                .find(|(a, b, _, _)| a == f && b == t)
+                .map(|(_, _, _, m)| Rect::from_center_size(*m, Vec2::splat(2.0)));
+        }
+        if let Some(name) = id.strip_prefix("dock:") {
+            return self
+                .dock_buttons
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, r)| *r);
+        }
         let id = if id == "root" { "" } else { id };
         self.motion
             .rect(id)
@@ -263,6 +299,9 @@ impl BoardView {
 
         // Overlays.
         self.toolbar(ui, screen, theme);
+        if let Some(r) = self.dock(ui, screen, theme) {
+            request = Some(r);
+        }
         self.prompt_ui(ui, theme);
         self.status(ui, screen, theme, now);
         if self.help {
@@ -322,8 +361,30 @@ impl BoardView {
             expanded.hash(&mut h);
             h.finish()
         };
+        // The card being edited is measured from the editor (blank lines included), not the file.
+        let editing: Option<(String, Option<Vec<Span>>, Vec<Line>)> =
+            self.editor.as_ref().map(|ed| {
+                let title = ed.lines.first().filter(|l| l.title).map(|l| l.spans());
+                let mut lines = ed.body_lines();
+                // Show empty lines while typing (they are not written to the file yet).
+                for l in &mut lines {
+                    if l.spans.is_empty() || l.spans.iter().all(|s| s.text.is_empty()) {
+                        l.spans = vec![Span::plain(" ")];
+                    }
+                }
+                (ed.card_id.clone(), title, lines)
+            });
+        let edit_hash = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            if let Some((id, t, lines)) = &editing {
+                id.hash(&mut h);
+                format!("{t:?}{lines:?}").hash(&mut h);
+            }
+            h.finish()
+        };
         let key = (
-            self.doc.revision ^ exp_hash.rotate_left(17),
+            self.doc.revision ^ exp_hash.rotate_left(17) ^ edit_hash.rotate_left(31),
             self.text_scale,
             self.theme_rev,
         );
@@ -361,15 +422,14 @@ impl BoardView {
         let layout = ctx.fonts_mut(|fonts| {
             let mut measure = |card: &Card, width: f32| -> f32 {
                 let mut aspect = |url: &str| images.peek_aspect(&dir, url);
-                let title: Option<Vec<Span>> = card.heading.as_ref().map(|h| title_spans(&h.spans));
-                let t = content::layout(
-                    fonts,
-                    &st,
-                    title.as_deref(),
-                    &card.lines,
-                    width,
-                    &mut aspect,
-                );
+                let (title, lines): (Option<Vec<Span>>, &[Line]) = match &editing {
+                    Some((id, t, lines)) if *id == card.id => (t.clone(), lines),
+                    _ => (
+                        card.heading.as_ref().map(|h| title_spans(&h.spans)),
+                        &card.lines,
+                    ),
+                };
+                let t = content::layout(fonts, &st, title.as_deref(), lines, width, &mut aspect);
                 let full = t.size.y.max(theme.body_size * self.text_scale);
                 // Long cards rest collapsed and unfold when selected or edited.
                 let max = COLLAPSED_HEIGHT * self.text_scale;
@@ -425,7 +485,14 @@ impl BoardView {
         // Board title.
         if let (Some(t), Some(pos)) = (&self.doc.board.title, self.layout.title_pos) {
             let size = theme.board_title_size * zoom;
+            self.title_rect = None;
             if size > 4.0 {
+                let g = p.layout_no_wrap(
+                    t.text.clone(),
+                    FontId::new(size, theme.title.clone()),
+                    theme.text,
+                );
+                self.title_rect = Some(Rect::from_min_size(cam.to_screen(screen, pos), g.size()));
                 p.text(
                     cam.to_screen(screen, pos),
                     Align2::LEFT_TOP,
@@ -648,7 +715,7 @@ impl BoardView {
         ] {
             p.circle(c, r, theme.card_fill, Stroke::new(1.6, theme.accent));
             self.hots.push((
-                Rect::from_center_size(c, Vec2::splat(r * 3.6)),
+                Rect::from_center_size(c, Vec2::splat(r * 5.5)),
                 Hot::Handle { id: id.to_string() },
             ));
         }
@@ -745,6 +812,7 @@ impl BoardView {
             })
             .collect();
         let mut placed: Vec<Rect> = Vec::new();
+        self.conn_paths.clear();
         for c in cs {
             let C {
                 from,
@@ -761,8 +829,9 @@ impl BoardView {
             }
             let chosen = self
                 .selected_conn
-                .as_ref()
-                .is_some_and(|(f, t)| *f == from && *t == to);
+                .iter()
+                .chain(self.hover_conn.iter())
+                .any(|(f, t)| *f == from && *t == to);
             let hot = chosen
                 || self.selection.iter().any(|s| s == &from || s == &to)
                 || self.hover.as_deref().is_some_and(|h| h == from || h == to);
@@ -779,6 +848,8 @@ impl BoardView {
             let (p0, n0) = draw::port(a, sides.0, fracs.0);
             let (p3, n3) = draw::port(b, sides.1, fracs.1);
             let (pts, mid, dir) = draw::curve(p0, n0, p3, n3);
+            self.conn_paths
+                .push((from.clone(), to.clone(), pts.clone(), mid));
             draw::pencil_line(p, &pts, stroke, theme, &format!("{from}>{to}"), zoom);
             if let Some(tip) = pts.last() {
                 draw::arrowhead(
@@ -804,15 +875,27 @@ impl BoardView {
                 let g = p.layout_no_wrap(text, FontId::new(size, family), color);
                 // Slide the label along the line until it sits on empty paper.
                 let size_r = g.size() + vec2(14.0, 4.0);
+                // The spot along the line that covers the least of the cards and other labels.
                 let mut r = Rect::from_center_size(mid, size_r);
-                for f in [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82] {
+                let mut best = f32::INFINITY;
+                for f in [
+                    0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82, 0.12, 0.88,
+                ] {
                     let i = ((pts.len().saturating_sub(1)) as f32 * f) as usize;
                     let Some(q) = pts.get(i) else { continue };
                     let cand = Rect::from_center_size(*q, size_r);
-                    let blocked = card_rects.iter().any(|(_, cr)| cr.intersects(cand))
-                        || placed.iter().any(|o| o.intersects(cand));
-                    if !blocked {
+                    let overlap: f32 = card_rects
+                        .iter()
+                        .map(|(_, cr)| cr.intersect(cand))
+                        .chain(placed.iter().map(|o| o.intersect(cand)))
+                        .filter(|x| x.is_positive())
+                        .map(|x| x.area())
+                        .sum();
+                    if overlap < best - 0.5 {
+                        best = overlap;
                         r = cand;
+                    }
+                    if overlap <= 0.0 {
                         break;
                     }
                 }
@@ -1494,6 +1577,45 @@ impl BoardView {
         }
     }
 
+    /// The connection whose line passes close to a screen point.
+    fn conn_at(&self, at: Pos2) -> Option<(String, String)> {
+        self.conn_paths
+            .iter()
+            .map(|(f, t, pts, _)| (f, t, distance_to(pts, at)))
+            .filter(|(_, _, d)| *d < 7.0)
+            .min_by(|a, b| a.2.total_cmp(&b.2))
+            .map(|(f, t, _)| (f.clone(), t.clone()))
+    }
+
+    /// A connectable card or area whose border is right at a screen point (a band of a few
+    /// points either side), so a drag can start a connection without hitting a dot exactly.
+    fn edge_of(&self, screen: Rect, at: Pos2) -> Option<String> {
+        let band = 9.0;
+        let mut best: Option<(String, usize)> = None;
+        for id in &self.layout.order {
+            let Some(r) = self.motion.rect(id) else {
+                continue;
+            };
+            let sr = self.camera.rect_to_screen(screen, r);
+            if sr.width() < 40.0 || !sr.expand(band).contains(at) || sr.shrink(band).contains(at) {
+                continue;
+            }
+            if !self.connectable(id) {
+                continue;
+            }
+            let n = self.layout.get(id)?;
+            // Areas only from their side and bottom edges (the top is the title band).
+            if n.kind == Kind::Area && at.y < sr.min.y + band {
+                continue;
+            }
+            let depth = n.depth + if n.kind == Kind::Card { 100 } else { 0 };
+            if best.as_ref().is_none_or(|(_, d)| depth > *d) {
+                best = Some((id.clone(), depth));
+            }
+        }
+        best.map(|b| b.0)
+    }
+
     /// Hit test: the topmost node under a screen point (cards above areas, inner above outer).
     fn hit(&self, screen: Rect, at: Pos2) -> Option<String> {
         let cam = self.camera;
@@ -1578,6 +1700,21 @@ impl BoardView {
             && let Some(at) = ptr
         {
             self.hover = self.hit(screen, at);
+            let hovered_area_or_none = self
+                .hover
+                .as_ref()
+                .is_none_or(|h| self.layout.get(h).is_some_and(|n| n.kind == Kind::Area));
+            self.hover_conn = if hovered_area_or_none && self.hot_at(at).is_none() {
+                self.conn_at(at)
+            } else {
+                None
+            };
+            if self.hover_conn.is_some() {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            } else if self.editor.is_none() && self.edge_of(screen, at).is_some() {
+                // On a card's border: dragging from here draws a connection.
+                ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+            }
             match self.hot_at(at) {
                 Some(Hot::Link { url }) => {
                     ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
@@ -1624,7 +1761,14 @@ impl BoardView {
                     self.hots.len()
                 );
             }
+            let edge = if self.editor.is_none() {
+                self.edge_of(screen, at)
+            } else {
+                None
+            };
             if let Some(Hot::Handle { id }) = hot {
+                self.drag = Drag::Connect { from: id, to: None };
+            } else if let Some(id) = edge {
                 self.drag = Drag::Connect { from: id, to: None };
             } else if let Some(ed) = &self.editor
                 && hit.as_deref() == Some(ed.card_id.as_str())
@@ -1804,14 +1948,64 @@ impl BoardView {
             }
             return;
         }
-        if let Some(Hot::Label { from, to }) = &hot
+        // Connections: click a label or the line itself to select, double-click to rename.
+        let conn = match &hot {
+            Some(Hot::Label { from, to }) => Some((from.clone(), to.clone())),
+            _ if hot.is_none()
+                && hit
+                    .as_ref()
+                    .is_none_or(|h| self.layout.get(h).is_some_and(|n| n.kind == Kind::Area)) =>
+            {
+                self.conn_at(at)
+            }
+            _ => None,
+        };
+        if let Some((from, to)) = conn
             && editing_id.is_none()
         {
-            self.selected_conn = Some((from.clone(), to.clone()));
+            if double {
+                let label = self
+                    .doc
+                    .board
+                    .connections()
+                    .into_iter()
+                    .find(|(f, t, _)| *f == from && *t == to)
+                    .map(|(_, _, c)| lowercase_first(&c.label))
+                    .unwrap_or_default();
+                let anchor = self
+                    .conn_paths
+                    .iter()
+                    .find(|(f, t, _, _)| *f == from && *t == to)
+                    .map_or(at, |(_, _, _, m)| *m);
+                self.prompt = Some(Prompt {
+                    kind: PromptKind::Relabel {
+                        from: from.clone(),
+                        to: to.clone(),
+                    },
+                    text: label,
+                    anchor: anchor + vec2(-60.0, 14.0),
+                    focus: true,
+                });
+            }
+            self.selected_conn = Some((from, to));
             self.selection.clear();
             return;
         }
         self.selected_conn = None;
+        if double
+            && editing_id.is_none()
+            && self.title_rect.is_some_and(|r| r.expand(6.0).contains(at))
+            && let Some(t) = &self.doc.board.title
+        {
+            let r = self.title_rect.unwrap_or(Rect::NOTHING);
+            self.prompt = Some(Prompt {
+                kind: PromptKind::BoardTitle,
+                text: t.text.clone(),
+                anchor: r.left_bottom() + vec2(0.0, 6.0),
+                focus: true,
+            });
+            return;
+        }
         if let Some(Hot::Link { url }) = &hot
             && !double
             && editing_id.as_deref() != hit.as_deref()
@@ -1952,8 +2146,87 @@ impl BoardView {
                 Some((node.key().to_string(), (x.round() as i32, y.round() as i32)))
             })
             .collect();
+        // Nothing else should move: pin the neighbors where they are now, in the target area
+        // and in every area around it (an area that grows must not push its neighbors).
+        let moved: Vec<String> = ids.to_vec();
+        let mut pins: Vec<(String, (i32, i32))> = Vec::new();
+        // The target's chain of areas, and the chains the items came from.
+        let mut containers: Vec<String> = Vec::new();
+        let mut starts: Vec<String> = vec![target.clone()];
+        for id in ids {
+            starts.push(
+                self.layout
+                    .get(id)
+                    .and_then(|n| n.parent.clone())
+                    .unwrap_or_default(),
+            );
+        }
+        for start in starts {
+            let mut c = start;
+            loop {
+                if !containers.contains(&c) {
+                    containers.push(c.clone());
+                }
+                if c.is_empty() {
+                    break;
+                }
+                c = self
+                    .layout
+                    .get(&c)
+                    .and_then(|n| n.parent.clone())
+                    .unwrap_or_default();
+            }
+        }
+        for container in containers {
+            let children: Vec<String> = if container.is_empty() {
+                self.doc
+                    .board
+                    .root
+                    .children
+                    .iter()
+                    .map(|c| c.id().to_string())
+                    .collect()
+            } else {
+                self.doc
+                    .board
+                    .area(&container)
+                    .map(|a| a.children.iter().map(|c| c.id().to_string()).collect())
+                    .unwrap_or_default()
+            };
+            let origin = if container.is_empty() {
+                Pos2::ZERO
+            } else {
+                self.layout
+                    .get(&container)
+                    .map(|n| n.content_origin)
+                    .unwrap_or(Pos2::ZERO)
+            };
+            for child in children {
+                if moved.contains(&child) {
+                    continue;
+                }
+                let (Some(node), Some(n)) = (self.doc.board.node(&child), self.layout.get(&child))
+                else {
+                    continue;
+                };
+                let key = node.key().to_string();
+                if self
+                    .doc
+                    .board
+                    .appendix
+                    .get(&key)
+                    .is_some_and(|e| e.at.is_some())
+                {
+                    continue;
+                }
+                let rel = n.rect.min - origin;
+                if !pins.iter().any(|(k, _)| *k == key) {
+                    pins.push((key, (rel.x.round() as i32, rel.y.round() as i32)));
+                }
+            }
+        }
         src = edit::with_appendix(&board, &src, |a| {
-            for (k, at) in &keys {
+            for (k, at) in pins.iter().chain(keys.iter()) {
                 a.entry_mut(k).at = Some(*at);
             }
         });
@@ -2513,12 +2786,20 @@ impl BoardView {
                     .collect();
             }
             Key::G if m.command => self.group_selected(screen),
+            Key::L if m.command && m.shift => self.tidy_up(),
             Key::Escape => {
                 if self.help {
                     self.help = false;
-                } else {
+                } else if !self.selection.is_empty() || self.selected_conn.is_some() {
                     self.selection.clear();
                     self.selected_conn = None;
+                } else if now - self.esc_at < 1.6 {
+                    // Esc twice closes skiss, like MDeck (everything is already saved).
+                    self.save_now();
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                } else {
+                    self.esc_at = now;
+                    self.toast = Some(("Press Esc again to close skiss".into(), now));
                 }
             }
             Key::Questionmark | Key::F1 => self.help = !self.help,
@@ -2578,6 +2859,38 @@ impl BoardView {
         }
         let _ = ui;
         None
+    }
+
+    /// Forgets hand-placed positions (of the selected areas, or everywhere) so skiss lays the
+    /// board out afresh. Colors stay.
+    pub fn tidy_up(&mut self) {
+        let scope: Vec<String> = self
+            .selection
+            .iter()
+            .filter(|id| self.doc.board.area(id).is_some())
+            .cloned()
+            .collect();
+        let keys: Vec<String> = self
+            .doc
+            .board
+            .walk()
+            .into_iter()
+            .filter(|n| !n.id().is_empty())
+            .filter(|n| scope.is_empty() || scope.iter().any(|a| self.is_inside(n.id(), a)))
+            .map(|n| n.key().to_string())
+            .collect();
+        let src = edit::with_appendix(&self.doc.board, &self.doc.source, |a| {
+            for k in &keys {
+                let e = a.entry_mut(k);
+                e.at = None;
+                e.size = None;
+            }
+        });
+        if src == self.doc.source {
+            self.toast = Some(("Already tidy".into(), self.last_time.unwrap_or(0.0)));
+        } else {
+            self.doc.apply(src, &self.selection, None);
+        }
     }
 
     fn fit(&mut self, screen: Rect) {
@@ -2983,6 +3296,113 @@ impl BoardView {
         self.doc.apply(src, &self.selection, None);
     }
 
+    /// The dock at the bottom: the main things you can make, always in reach.
+    fn dock(&mut self, ui: &mut Ui, screen: Rect, theme: &Theme) -> Option<UiRequest> {
+        let mut act: Option<&str> = None;
+        let mut rects: Vec<(String, Rect)> = Vec::new();
+        let can_group = !self.selection.is_empty();
+        let shown = egui::Area::new(egui::Id::unique("skiss-dock"))
+            .fixed_pos(screen.center_bottom() - vec2(0.0, 14.0))
+            .pivot(Align2::CENTER_BOTTOM)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::new()
+                    .fill(theme.ui_bg.gamma_multiply(0.94))
+                    .corner_radius(12.0)
+                    .inner_margin(egui::Margin::symmetric(10, 6))
+                    .shadow(egui::Shadow {
+                        offset: [0, 3],
+                        blur: 14,
+                        spread: 0,
+                        color: Color32::from_black_alpha(55),
+                    })
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                            let mut b =
+                                |ui: &mut Ui,
+                                 label: &str,
+                                 tip: &str,
+                                 on: bool,
+                                 key: &'static str| {
+                                    let text = egui::RichText::new(label).size(14.0).color(if on {
+                                        theme.ui_text
+                                    } else {
+                                        theme.ui_text.gamma_multiply(0.35)
+                                    });
+                                    let r = ui.add_enabled(
+                                        on,
+                                        egui::Button::new(text)
+                                            .frame(false)
+                                            .min_size(vec2(30.0, 26.0)),
+                                    );
+                                    rects.push((key.to_string(), r.rect));
+                                    if r.on_hover_text(keys(tip)).clicked() {
+                                        act = Some(key);
+                                    }
+                                };
+                            b(
+                                ui,
+                                "+ Card",
+                                "New card (double-click empty space, or Tab)",
+                                true,
+                                "card",
+                            );
+                            b(
+                                ui,
+                                "+ Area",
+                                "New area (or select cards and press ⌘G)",
+                                true,
+                                "area",
+                            );
+                            b(
+                                ui,
+                                "Group",
+                                "Put the selected cards in a new area (⌘G)",
+                                can_group,
+                                "group",
+                            );
+                            ui.separator();
+                            b(
+                                ui,
+                                "Tidy up",
+                                "Lay everything out again (⌘⇧L)",
+                                true,
+                                "tidy",
+                            );
+                            ui.separator();
+                            let name = if theme.dark { "Ember" } else { "Sketchbook" };
+                            b(ui, name, "Switch theme (⌘T)", true, "theme");
+                            b(ui, "?", "Shortcuts", true, "help");
+                        });
+                    });
+            });
+        self.dock_buttons = rects;
+        let now = ui.input(|i| i.time);
+        let anchor = shown.response.rect.center_top() + vec2(-130.0, -96.0);
+        match act {
+            Some("card") => {
+                let area = self.target_area();
+                self.new_card_at(screen, &area, None, screen.center(), now);
+            }
+            Some("area") => {
+                let parent = self.target_area();
+                self.prompt = Some(Prompt {
+                    kind: PromptKind::NewArea { parent },
+                    text: String::new(),
+                    anchor,
+                    focus: true,
+                });
+            }
+            Some("group") => self.group_selected(screen),
+            Some("tidy") => self.tidy_up(),
+            Some("theme") => return Some(UiRequest::ToggleTheme),
+            Some("help") => self.help = !self.help,
+            _ => {}
+        }
+        None
+    }
+
     fn set_color(&mut self, c: Color) {
         self.commit_editor(true);
         let keys: Vec<String> = self
@@ -3006,36 +3426,41 @@ impl BoardView {
             return;
         };
         let mut done: Option<bool> = None;
-        let suggestions: Vec<String> = if let PromptKind::Label { .. } = prompt.kind {
-            let mut s: Vec<String> = Vec::new();
-            for (_, _, c) in self.doc.board.connections() {
-                let l = lowercase_first(&c.label);
-                if !l.is_empty() && !s.contains(&l) {
-                    s.push(l);
+        let suggestions: Vec<String> =
+            if let PromptKind::Label { .. } | PromptKind::Relabel { .. } = prompt.kind {
+                let mut s: Vec<String> = Vec::new();
+                for (_, _, c) in self.doc.board.connections() {
+                    let l = lowercase_first(&c.label);
+                    if !l.is_empty() && !s.contains(&l) {
+                        s.push(l);
+                    }
                 }
-            }
-            for d in [
-                "manages",
-                "reports to",
-                "depends on",
-                "told me to contact",
-                "works with",
-            ] {
-                if !s.iter().any(|x| x == d) {
-                    s.push(d.to_string());
+                for d in [
+                    "manages",
+                    "reports to",
+                    "depends on",
+                    "told me to contact",
+                    "works with",
+                ] {
+                    if !s.iter().any(|x| x == d) {
+                        s.push(d.to_string());
+                    }
                 }
-            }
-            s
-        } else {
-            Vec::new()
-        };
+                s
+            } else {
+                Vec::new()
+            };
         let title = match &prompt.kind {
             PromptKind::Label { .. } => "How are they connected?",
             PromptKind::AreaTitle { .. } => "Area title",
             PromptKind::ColorName { .. } => "What does this color mean?",
+            PromptKind::Relabel { .. } => "How are they connected?",
+            PromptKind::BoardTitle => "Board title",
+            PromptKind::NewArea { .. } => "Name the new area",
         };
         let mut picked: Option<String> = None;
-        egui::Area::new(egui::Id::unique("skiss-prompt"))
+        let first_frame = prompt.focus;
+        let shown = egui::Area::new(egui::Id::unique("skiss-prompt"))
             .fixed_pos(prompt.anchor)
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
@@ -3059,15 +3484,30 @@ impl BoardView {
                         let edit = egui::TextEdit::singleline(&mut prompt.text)
                             .desired_width(240.0)
                             .text_color(theme.ui_text)
+                            .background_color(Color32::from_white_alpha(16))
                             .hint_text(match prompt.kind {
-                                PromptKind::Label { .. } => "reports to",
-                                PromptKind::AreaTitle { .. } => "Untitled",
+                                PromptKind::Label { .. } | PromptKind::Relabel { .. } => {
+                                    "reports to"
+                                }
+                                PromptKind::AreaTitle { .. } | PromptKind::BoardTitle => "Untitled",
+                                PromptKind::NewArea { .. } => "People",
                                 PromptKind::ColorName { .. } => "Blocked",
                             })
                             .font(FontId::proportional(16.0));
-                        let r = ui.add(edit);
+                        let out = edit.show(ui);
+                        let r = out.response;
                         if prompt.focus {
+                            // Start with the current text selected: typing replaces it.
                             r.request_focus();
+                            let mut state = out.state;
+                            let n = prompt.text.chars().count();
+                            state
+                                .cursor
+                                .set_char_range(Some(egui::text::CCursorRange::two(
+                                    egui::text::CCursor::new(0),
+                                    egui::text::CCursor::new(n),
+                                )));
+                            state.store(ui.ctx(), r.id);
                             prompt.focus = false;
                         }
                         if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
@@ -3109,6 +3549,16 @@ impl BoardView {
             prompt.text = p;
             done = Some(true);
         }
+        // Clicking anywhere else confirms, like leaving any text field.
+        let outside = ui.input(|i| {
+            i.pointer.any_pressed()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| !shown.response.rect.expand(4.0).contains(p))
+        });
+        if done.is_none() && outside && !first_frame {
+            done = Some(true);
+        }
         let Some(ok) = done else { return };
         let prompt = self.prompt.take().expect("prompt");
         if !ok {
@@ -3145,6 +3595,51 @@ impl BoardView {
                             self.selection = vec![nid];
                         }
                     }
+                }
+            }
+            PromptKind::Relabel { from, to } => {
+                if let Some(src) = edit::relabel_connection(
+                    &self.doc.board,
+                    &self.doc.source,
+                    &from,
+                    &to,
+                    &prompt.text,
+                ) {
+                    self.doc.apply(src, &self.selection, None);
+                }
+                self.selected_conn = Some((from, to));
+            }
+            PromptKind::NewArea { parent } => {
+                let name = if prompt.text.trim().is_empty() {
+                    "New area"
+                } else {
+                    prompt.text.trim()
+                };
+                if let Some(Edited { source, at }) =
+                    edit::insert_area(&self.doc.board, &self.doc.source, &parent, name, "New card")
+                {
+                    self.doc.break_coalescing();
+                    self.doc
+                        .apply(source, &self.selection, Some(&format!("edit:{at}")));
+                    self.motion.spawn_from = Some(self.camera.center);
+                    if let Some(n) = edit::node_at(&self.doc.board, at) {
+                        let id = n.id().to_string();
+                        self.selection = vec![id.clone()];
+                        self.start_editing(&id, None, true, self.last_time.unwrap_or(0.0));
+                        // "New card" is selected: typing replaces it.
+                        if let Some(ed) = &mut self.editor {
+                            let len = ed.lines[0].chars.len();
+                            ed.set_cursor(Pos { line: 0, col: 0 }, false);
+                            ed.set_cursor(Pos { line: 0, col: len }, true);
+                        }
+                    }
+                }
+            }
+            PromptKind::BoardTitle => {
+                if let Some(src) =
+                    edit::rename_title(&self.doc.board, &self.doc.source, &prompt.text)
+                {
+                    self.doc.apply(src, &self.selection, None);
                 }
             }
             PromptKind::ColorName { color } => {
@@ -3224,10 +3719,12 @@ impl BoardView {
             ("Enter", "edit the selected card"),
             ("Tab", "add the next card"),
             ("Esc", "stop editing, clear selection"),
+            ("Esc Esc", "close skiss"),
             ("Drag a card", "move it (into another area too)"),
             ("Drag a dot on the edge", "connect two cards"),
             ("Shift-drag", "select several"),
             ("⌘G", "group into a new area"),
+            ("⌘⇧L", "tidy up the layout"),
             ("⌘B  ⌘I  ⌘E", "bold, italic, code"),
             ("⌘L or [ ]", "turn a line into a task"),
             ("⌘Z  ⌘Y", "undo, redo"),
@@ -3333,4 +3830,16 @@ fn keys(s: &str) -> String {
     } else {
         s.replace('⌘', "Ctrl+").replace('⇧', "Shift+")
     }
+}
+
+/// Distance from a point to a polyline.
+fn distance_to(pts: &[Pos2], p: Pos2) -> f32 {
+    pts.windows(2)
+        .map(|w| {
+            let (a, b) = (w[0], w[1]);
+            let ab = b - a;
+            let t = ((p - a).dot(ab) / ab.length_sq().max(1e-6)).clamp(0.0, 1.0);
+            (a + ab * t - p).length()
+        })
+        .fold(f32::INFINITY, f32::min)
 }

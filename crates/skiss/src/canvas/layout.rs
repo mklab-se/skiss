@@ -297,8 +297,14 @@ fn place_area(
                 row_h = row_h.max(p.size.y);
             }
         }
-        max = max.max(p.pos + p.size);
         placed.push(p);
+    }
+    // Nothing may overlap: when something grew (a card being typed in, an area that got a new
+    // card), whatever it now covers is nudged down just enough. Only the view changes; the
+    // positions in the file stay as they were.
+    resolve_overlaps(&mut placed, gap);
+    for p in &placed {
+        max = max.max(p.pos + p.size);
     }
     if root {
         return Placed {
@@ -326,5 +332,31 @@ fn place_area(
         header,
         origin,
         children: placed,
+    }
+}
+
+fn resolve_overlaps(items: &mut [Placed], gap: f32) {
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    order.sort_by(|&a, &b| {
+        (items[a].pos.y, items[a].pos.x)
+            .partial_cmp(&(items[b].pos.y, items[b].pos.x))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for (k, &i) in order.iter().enumerate() {
+        for _ in 0..64 {
+            let me = Rect::from_min_size(pos2(items[i].pos.x, items[i].pos.y), items[i].size);
+            let hit = order[..k].iter().find_map(|&j| {
+                let other =
+                    Rect::from_min_size(pos2(items[j].pos.x, items[j].pos.y), items[j].size);
+                other
+                    .expand(gap * 0.4)
+                    .intersects(me)
+                    .then_some(other.max.y)
+            });
+            match hit {
+                Some(bottom) => items[i].pos.y = bottom + gap * 0.5,
+                None => break,
+            }
+        }
     }
 }

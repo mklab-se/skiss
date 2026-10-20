@@ -65,6 +65,9 @@ pulldown-cmark = { version = "0.13", default-features = false }
 # File watching, clipboard images, image files
 notify = "8.2"
 arboard = "3.7"
+# Native file and folder dialogs (start screen). Default features use the desktop portal on
+# Linux, so no GTK is needed to build.
+rfd = "0.17"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
 # AI

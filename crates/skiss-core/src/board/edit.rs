@@ -574,6 +574,49 @@ pub fn remove_connection(board: &Board, src: &str, from: &str, to: &str) -> Opti
     Some(splice(src, conn.line.clone(), &new_line))
 }
 
+/// Changes the words of a connection ("manages" to "reports to"). A sentence with several
+/// targets is split: the renamed target gets its own line.
+pub fn relabel_connection(
+    board: &Board,
+    src: &str,
+    from: &str,
+    to: &str,
+    label: &str,
+) -> Option<String> {
+    let anchor = board.anchor_of(to)?.to_string();
+    let source = board.node(from)?;
+    let conn = source
+        .connections()
+        .iter()
+        .find(|c| c.targets.contains(&anchor))?;
+    let new_label = if label.trim().is_empty() {
+        "Related to".to_string()
+    } else {
+        capitalize(label)
+    };
+    if conn.label.eq_ignore_ascii_case(&new_label) {
+        return None;
+    }
+    if conn.targets.len() > 1 {
+        let out = remove_connection(board, src, from, to)?;
+        let b = Board::parse(&out);
+        return add_connection(&b, &out, from, to, &new_label);
+    }
+    let line = &src[conn.line.clone()];
+    let link = line.find("](#")?;
+    let open = line[..link].rfind('[')?;
+    // After the list marker and its spaces.
+    let t = line.trim_start();
+    let indent = line.len() - t.len();
+    let marker = t.find(' ').map(|i| indent + i + 1)?;
+    let start = conn.line.start + marker;
+    let end = conn.line.start + open;
+    if end < start {
+        return None;
+    }
+    Some(splice(src, start..end, &format!("{new_label} ")))
+}
+
 // --- Moving and grouping -------------------------------------------------------------------
 
 /// Shifts every ATX heading in `text` by `delta` levels (clamped to 1..=6).
@@ -734,6 +777,31 @@ pub fn group(board: &Board, src: &str, ids: &[String], title: &str) -> Option<Ed
     Some(Edited { source, at })
 }
 
+/// Adds a new area with one first card (an area is a heading with sub-headings, so it needs
+/// one). Returns the offset of the first card's heading.
+pub fn insert_area(
+    board: &Board,
+    src: &str,
+    parent: &str,
+    title: &str,
+    first_card: &str,
+) -> Option<Edited> {
+    let area = board.area(parent)?;
+    let level = area.child_level.clamp(1, 5) as usize;
+    let at = if area.id.is_empty() {
+        board.content_end()
+    } else {
+        area.section.end.min(board.content_end())
+    };
+    let head = format!("{} {}", "#".repeat(level), title.trim());
+    let card = format!("{} {}", "#".repeat(level + 1), first_card.trim());
+    let (source, start) = insert_block(src, at, &format!("{head}\n\n{card}"));
+    Some(Edited {
+        at: start + head.len() + 2,
+        source,
+    })
+}
+
 /// Adds a loose block (an image, a paragraph) to the end of an area's loose content.
 pub fn insert_loose(board: &Board, src: &str, area_id: &str, block: &str) -> Option<Edited> {
     let area = board.area(area_id)?;
@@ -837,6 +905,21 @@ pub fn rename_heading(board: &Board, src: &str, id: &str, title: &str) -> Option
         source: out,
         at: start,
     })
+}
+
+/// Renames the board title (the H1).
+pub fn rename_title(board: &Board, src: &str, title: &str) -> Option<String> {
+    let h = board.title.as_ref()?;
+    let title = title.trim();
+    if title == h.text {
+        return None;
+    }
+    let line = if title.is_empty() {
+        "#".to_string()
+    } else {
+        format!("# {title}")
+    };
+    Some(splice(src, h.line.clone(), &line))
 }
 
 /// The node (not the root) whose source starts at `at`.
@@ -993,6 +1076,45 @@ Tech lead.
         let b2 = Board::parse(&out);
         let back = remove_connection(&b2, &out, "anna-berg", "sara-ek").unwrap();
         assert_eq!(back, src);
+    }
+
+    #[test]
+    fn relabel_rewrites_the_words_only() {
+        let b = Board::parse(SRC);
+        let out = relabel_connection(&b, SRC, "anna-berg", "erik-lund", "mentors").unwrap();
+        assert_eq!(
+            out,
+            SRC.replace("- Manages [Erik Lund]", "- Mentors [Erik Lund]")
+        );
+    }
+
+    #[test]
+    fn relabel_splits_a_shared_sentence() {
+        let src = SRC.replace(
+            "- Manages [Erik Lund](#erik-lund)",
+            "- Manages [Erik Lund](#erik-lund) and [Next steps](#next-steps)",
+        );
+        let b = Board::parse(&src);
+        let out = relabel_connection(&b, &src, "anna-berg", "next-steps", "owns").unwrap();
+        assert!(
+            out.contains("- Manages [Erik Lund](#erik-lund)\n- Owns [Next steps](#next-steps)\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn new_area_comes_with_a_first_card() {
+        let b = Board::parse(SRC);
+        let e = insert_area(&b, SRC, "", "Risks", "New card").unwrap();
+        assert!(
+            e.source
+                .ends_with("- [ ] Draft risks\n\n## Risks\n\n### New card\n"),
+            "{}",
+            e.source
+        );
+        let nb = Board::parse(&e.source);
+        assert!(nb.area("risks").is_some());
+        assert_eq!(node_at(&nb, e.at).unwrap().id(), "new-card");
     }
 
     #[test]

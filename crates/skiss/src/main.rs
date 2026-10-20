@@ -41,7 +41,11 @@ async fn main() -> Result<()> {
     }
 
     // Spawn a background update check (skipped in quiet mode or if disabled via env).
-    let update_handle = if !cli.quiet && std::env::var("SKISS_NO_UPDATE_CHECK").is_err() {
+    // The detached window process has no terminal to print a notice to.
+    let update_handle = if !cli.quiet
+        && std::env::var("SKISS_NO_UPDATE_CHECK").is_err()
+        && std::env::var_os("SKISS_DETACHED").is_none()
+    {
         Some(tokio::spawn(update::check_for_updates()))
     } else {
         None
