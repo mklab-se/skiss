@@ -111,9 +111,15 @@ pub fn card_width(card: &Card, aspect: &Aspect<'_>, column: f32, gap: f32) -> f3
         .sum();
     // Long writing gets as many columns as keep the card about as wide as it is tall: a page
     // of prose reads like a newspaper spread, not a scroll.
+    // Columns break between paragraphs, so three columns need enough of them to come out even.
+    let paragraphs = card
+        .lines
+        .iter()
+        .filter(|l| matches!(l.kind, LineKind::Paragraph | LineKind::Quote))
+        .count();
     let cols = match words {
         0..=150 => 0,
-        151..=420 => 2,
+        _ if words <= 300 || paragraphs < 6 => 2,
         _ => 3,
     };
     if cols > 0 && !has_image {
