@@ -3,14 +3,15 @@
 use anyhow::Result;
 use clap::Parser;
 
-/// A template for building Rust command-line tools.
+/// An infinite canvas for your notes, stored as Markdown.
 #[derive(Parser)]
-#[command(name = "rusty-tmpl")]
+#[command(name = "skiss")]
 #[command(author, version, about)]
-#[command(long_about = "A template for building Rust command-line tools.\n\n\
-    Run without a subcommand to print \"Hello world!\". The reusable plumbing \
-    (AI integration, shell completions, and versioning) is wired up so you can \
-    focus on your tool's own commands.")]
+#[command(
+    long_about = "An infinite canvas for your notes, stored as Markdown.\n\n\
+    skiss is in early development: the canvas is not built yet. For now it offers \
+    the AI status/config, shell completions and version commands."
+)]
 #[command(propagate_version = true)]
 pub struct Cli {
     /// Increase output verbosity (-v for debug, -vv for trace)
@@ -55,17 +56,17 @@ pub enum AiCommands {
         /// Message to send (default: "Say hello in one sentence.")
         message: Option<String>,
     },
-    /// Enable AI features for rusty-tmpl
+    /// Enable AI features for skiss
     Enable,
-    /// Disable AI features for rusty-tmpl
+    /// Disable AI features for skiss
     Disable,
     /// Interactively configure AI provider and model settings
     Config,
-    /// Show AI status (same as running `rusty-tmpl ai` without a subcommand)
+    /// Show AI status (same as running `skiss ai` without a subcommand)
     Status,
 }
 
-/// Shells supported by `rusty-tmpl completion`.
+/// Shells supported by `skiss completion`.
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum Shell {
     Bash,
@@ -87,10 +88,12 @@ impl Cli {
                 crate::banner::print_banner_with_version();
                 Ok(())
             }
-            // No subcommand: the almost-empty default. Replace this with your
-            // tool's behavior, or route to a real command. `--help` still works.
+            // No subcommand: show who we are until `skiss <file.md>` opens a canvas.
             None => {
-                println!("Hello world!");
+                crate::banner::print_banner_with_version();
+                println!(
+                    " The canvas is not built yet. Run `skiss --help` to see what works today."
+                );
                 Ok(())
             }
         }

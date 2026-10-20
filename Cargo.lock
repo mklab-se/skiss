@@ -2152,38 +2152,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
-name = "rusty-tmpl"
-version = "0.1.0"
-dependencies = [
- "ailloy",
- "anyhow",
- "chrono",
- "clap",
- "clap_complete",
- "colored",
- "reqwest",
- "rusty-tmpl-core",
- "semver",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "rusty-tmpl-core"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "serde",
- "serde_json",
- "serde_norway",
- "tempfile",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2377,6 +2345,38 @@ name = "siphasher"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
+
+[[package]]
+name = "skiss"
+version = "0.0.1"
+dependencies = [
+ "ailloy",
+ "anyhow",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "colored",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "skiss-core",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "skiss-core"
+version = "0.0.1"
+dependencies = [
+ "dirs",
+ "serde",
+ "serde_json",
+ "serde_norway",
+ "tempfile",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "slab"

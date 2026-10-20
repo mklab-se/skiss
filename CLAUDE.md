@@ -4,9 +4,10 @@ Guidance for Claude Code (and other agents) working in this repository.
 
 ## What this is
 
-`rusty-tmpl` is a **template repository** for MKLab Rust CLI tools. New tools are created from it via
-GitHub's "Use this template", then renamed (see the "Using this template" section of `README.md`).
-Keep it generic: it should compile, run, and pass CI as-is, while carrying no tool-specific logic.
+`skiss` (Swedish for "sketch") is an infinite-canvas, Miro-style note-taking tool that stores
+everything in Markdown, in the spirit of MDeck (`../mdeck/`). Usage: `skiss mynotes.md`.
+Homepage: https://skiss.net. The domain design is still being worked out; this file describes the
+scaffold until then.
 
 ## Template lineage
 
@@ -34,17 +35,17 @@ back to the GitHub URL if the sibling directory isn't present.
 
 A two-crate Cargo workspace:
 
-- `crates/rusty-tmpl/`: the CLI binary.
+- `crates/skiss/`: the CLI binary.
   - `main.rs`: `#[tokio::main]`; sets up logging, dynamic-completion env, the `--no-color` override,
     and spawns the background update check, then calls `Cli::run`.
   - `cli.rs`: clap-derive `Cli`, `Commands`, `AiCommands`, `Shell`; `Cli::run` dispatches. **The
-    no-subcommand (`None`) arm intentionally prints `Hello world!`** instead of help (per the template
-    brief). `--help`/`-h` still work via clap.
+    no-subcommand (`None`) arm prints the banner and a "not built yet" note** until
+    `skiss <file.md>` opens a canvas. `--help`/`-h` work via clap.
   - `commands/`: one module per command (`ai`, `completion`). Add new commands here.
   - `banner.rs`: ASCII block-letter banner + version line.
   - `update.rs`: polls crates.io, caches the result for 24h in `paths::cache_dir()`, notifies on a
     newer version.
-- `crates/rusty-tmpl-core/`: framework-agnostic library (no clap/tokio).
+- `crates/skiss-core/`: framework-agnostic library (no clap/tokio).
   - `config.rs`: YAML `Config` in `paths::config_dir()`, a reusable starting point (unused so far).
   - `paths.rs`: where the tool keeps files. Linux and macOS share the XDG layout, same as Ailloy:
     `$XDG_CONFIG_HOME/<tool>` or `~/.config/<tool>`, `$XDG_CACHE_HOME/<tool>` or

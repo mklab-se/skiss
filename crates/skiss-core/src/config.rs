@@ -1,7 +1,7 @@
 //! Tool configuration.
 //!
 //! A minimal, reusable starting point: a YAML config stored in the platform
-//! config directory (`~/.config/rusty-tmpl/config.yaml` on Linux/macOS). No
+//! config directory (`~/.config/skiss/config.yaml` on Linux/macOS). No
 //! command uses it yet; it's here so a new tool has somewhere obvious to grow
 //! its settings. Add fields to [`Config`] and they round-trip automatically.
 

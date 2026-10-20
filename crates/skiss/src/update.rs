@@ -1,6 +1,6 @@
 //! Version update checker.
 //!
-//! Queries crates.io for the latest version of rusty-tmpl, caches results for
+//! Queries crates.io for the latest version of skiss, caches results for
 //! 24 hours, and prints a notification if a newer version is available.
 
 use std::io::Write;
@@ -10,7 +10,7 @@ use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-const CRATE_NAME: &str = "rusty-tmpl";
+const CRATE_NAME: &str = "skiss";
 const CACHE_DURATION_HOURS: i64 = 24;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,7 +31,7 @@ struct CrateInfo {
 }
 
 fn cache_path() -> Option<PathBuf> {
-    rusty_tmpl_core::paths::cache_dir().map(|d| d.join("update-check.json"))
+    skiss_core::paths::cache_dir().map(|d| d.join("update-check.json"))
 }
 
 fn read_cache() -> Option<UpdateCache> {
@@ -68,7 +68,7 @@ fn write_cache(latest_version: &str) {
 async fn fetch_latest_version() -> Option<String> {
     let url = format!("https://crates.io/api/v1/crates/{CRATE_NAME}");
     let client = reqwest::Client::builder()
-        .user_agent(format!("rusty-tmpl/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("skiss/{}", env!("CARGO_PKG_VERSION")))
         .build()
         .ok()?;
 
@@ -83,15 +83,15 @@ fn detect_install_method() -> &'static str {
             || exe_str.contains("Cellar")
             || exe_str.contains("linuxbrew")
         {
-            return "brew upgrade rusty-tmpl";
+            return "brew upgrade skiss";
         }
     }
 
     if which_exists("cargo-binstall") {
-        return "cargo binstall rusty-tmpl";
+        return "cargo binstall skiss";
     }
 
-    "cargo install rusty-tmpl"
+    "cargo install skiss"
 }
 
 fn which_exists(name: &str) -> bool {
@@ -108,7 +108,7 @@ fn print_update_notification(current: &semver::Version, latest: &semver::Version
     let _ = writeln!(
         std::io::stderr(),
         "\n{} {} → {} (update with: {})",
-        "A new version of rusty-tmpl is available:".yellow().bold(),
+        "A new version of skiss is available:".yellow().bold(),
         current.to_string().dimmed(),
         latest.to_string().green().bold(),
         update_cmd.cyan(),
@@ -143,6 +143,6 @@ pub async fn check_for_updates() {
     if latest > current {
         print_update_notification(&current, &latest);
     } else {
-        debug!(current = %current, latest = %latest, "rusty-tmpl is up to date");
+        debug!(current = %current, latest = %latest, "skiss is up to date");
     }
 }

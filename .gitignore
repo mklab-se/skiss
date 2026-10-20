@@ -12,7 +12,7 @@
 Thumbs.db
 
 *.log
-rusty-tmpl.yaml
+skiss.yaml
 coverage/
 
 **/mutants.out*/

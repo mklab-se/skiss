@@ -4,7 +4,7 @@ description: "Release a new version: bump version, update docs, commit, push, ta
 argument-hint: "<major|minor|patch>"
 ---
 
-Release a new version of rusty-tmpl.
+Release a new version of skiss.
 
 ## Input
 
@@ -19,7 +19,7 @@ $ARGUMENTS must be one of: `major`, `minor`, `patch`. If empty or invalid, stop 
   - `patch`: 0.1.0 -> 0.1.1
   - `minor`: 0.1.0 -> 0.2.0
   - `major`: 0.1.0 -> 1.0.0
-- Show the user: "Releasing rusty-tmpl v{OLD} -> v{NEW}"
+- Show the user: "Releasing skiss v{OLD} -> v{NEW}"
 
 ### 2. Update toolchain and dependencies
 
@@ -41,7 +41,7 @@ $ARGUMENTS must be one of: `major`, `minor`, `patch`. If empty or invalid, stop 
 ### 4. Bump version numbers
 
 - Update `version` in the root `Cargo.toml` `[workspace.package]` section
-- Update internal crate dependency versions (`rusty-tmpl-core`) in the root `Cargo.toml`
+- Update internal crate dependency versions (`skiss-core`) in the root `Cargo.toml`
   `[workspace.dependencies]` section; they use `version = "X.Y.Z"` format
 
 ### 5. Update documentation
@@ -67,14 +67,14 @@ $ARGUMENTS must be one of: `major`, `minor`, `patch`. If empty or invalid, stop 
 ### 8. Watch and verify
 
 - The tag push triggers the Release workflow. Do NOT declare success yet; watch it:
-  `gh run list --repo mklab-se/rusty-tmpl --workflow release.yml --limit 1`, then
-  `gh run watch <id> --repo mklab-se/rusty-tmpl --exit-status` until it completes
+  `gh run list --repo mklab-se/skiss --workflow release.yml --limit 1`, then
+  `gh run watch <id> --repo mklab-se/skiss --exit-status` until it completes
 - If it fails, inspect with `gh run view <id> --log-failed`, fix the cause, and re-release as a patch
 - When it is green, confirm the outputs:
-  - `gh release view v{NEW_VERSION} --repo mklab-se/rusty-tmpl` lists 4 archives
+  - `gh release view v{NEW_VERSION} --repo mklab-se/skiss` lists 4 archives
     (3 × `.tar.gz`, 1 × `.zip`) plus 4 matching `.cdx.json` SBOMs
-  - `cargo search rusty-tmpl --limit 1` shows the new version on crates.io
-  - `Formula/rusty-tmpl.rb` in `mklab-se/homebrew-tap` carries the new version
+  - `cargo search skiss --limit 1` shows the new version on crates.io
+  - `Formula/skiss.rb` in `mklab-se/homebrew-tap` carries the new version
 
 ### 9. Confirm
 

@@ -1,12 +1,12 @@
 [package]
-name = "rusty-tmpl-core"
+name = "skiss-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Core types and configuration for rusty-tmpl"
+description = "Core types and configuration for skiss"
 
 [dependencies]
 serde.workspace = true

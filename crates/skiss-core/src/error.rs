@@ -1,4 +1,4 @@
-//! Error types for `rusty-tmpl-core`.
+//! Error types for `skiss-core`.
 //!
 //! A small `thiserror`-based enum to start from. Add variants as your tool
 //! grows; the CLI converts these into `anyhow::Error` automatically via the

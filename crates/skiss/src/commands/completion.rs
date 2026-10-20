@@ -1,7 +1,7 @@
 //! Shell completion generation.
 //!
-//! - Static (AOT): `rusty-tmpl completion <shell>` generates a static completion script
-//! - Dynamic: `source <(COMPLETE=<shell> rusty-tmpl)` enables dynamic completions
+//! - Static (AOT): `skiss completion <shell>` generates a static completion script
+//! - Dynamic: `source <(COMPLETE=<shell> skiss)` enables dynamic completions
 //!   (handled in main.rs via `clap_complete::CompleteEnv`)
 
 use std::io;
@@ -29,12 +29,12 @@ pub fn generate_completions(shell: Shell) {
     };
 
     let mut cmd = Cli::command();
-    generate(clap_shell, &mut cmd, "rusty-tmpl", &mut io::stdout());
+    generate(clap_shell, &mut cmd, "skiss", &mut io::stdout());
 
     eprintln!();
     eprintln!("{} For dynamic completions, use instead:", "Tip:".bold());
     eprintln!(
         "  {}",
-        format!("source <(COMPLETE={shell_name} rusty-tmpl)").cyan()
+        format!("source <(COMPLETE={shell_name} skiss)").cyan()
     );
 }

@@ -1,4 +1,4 @@
-//! Core types and configuration for `rusty-tmpl`.
+//! Core types and configuration for `skiss`.
 //!
 //! This crate holds the framework-agnostic pieces of the tool (configuration
 //! and error types) so they can be reused by the CLI binary, tests, or any

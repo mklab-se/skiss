@@ -1,21 +1,21 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/rusty-tmpl",
-    "crates/rusty-tmpl-core",
+    "crates/skiss",
+    "crates/skiss-core",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 authors = ["Kristofer Liljeblad <kristofer@mklab.se>"]
 license = "MIT"
-repository = "https://github.com/mklab-se/rusty-tmpl"
+repository = "https://github.com/mklab-se/skiss"
 rust-version = "1.88"
 
 [workspace.dependencies]
 # Internal crates
-rusty-tmpl-core = { version = "0.1.0", path = "crates/rusty-tmpl-core" }
+skiss-core = { version = "0.0.1", path = "crates/skiss-core" }
 
 # CLI
 clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }

@@ -1,22 +1,22 @@
 [package]
-name = "rusty-tmpl"
+name = "skiss"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "A template for building Rust command-line tools"
+description = "An infinite canvas for your notes, stored as Markdown"
 readme = "../../README.md"
-keywords = ["cli", "template", "starter", "scaffold"]
+keywords = ["cli", "markdown", "canvas", "notes", "whiteboard"]
 categories = ["command-line-utilities"]
 
 [[bin]]
-name = "rusty-tmpl"
+name = "skiss"
 path = "src/main.rs"
 
 [dependencies]
-rusty-tmpl-core.workspace = true
+skiss-core.workspace = true
 ailloy.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
@@ -32,8 +32,8 @@ semver.workspace = true
 chrono.workspace = true
 
 [package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/rusty-tmpl-v{ version }-{ target }.{ archive-format }"
-bin-dir = "rusty-tmpl{ binary-ext }"
+pkg-url = "{ repo }/releases/download/v{ version }/skiss-v{ version }-{ target }.{ archive-format }"
+bin-dir = "skiss{ binary-ext }"
 pkg-fmt = "tgz"
 
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]

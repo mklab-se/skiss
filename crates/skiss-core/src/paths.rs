@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 /// Folder name under the config and cache roots.
-pub const TOOL: &str = "rusty-tmpl";
+pub const TOOL: &str = "skiss";
 
 /// The tool's config directory (holds `config.yaml`).
 #[cfg(not(windows))]
